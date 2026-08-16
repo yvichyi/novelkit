@@ -93,14 +93,14 @@ def load_key(arg_key: str) -> str:
 def ask_stage_plan(total_chapters: int):
     """阶段规划交互：返回 [(阶段名, 章起, 章止, 一句话)]"""
     print(f"\n{C_B}📚 阶段规划（每个阶段 = 小说的一个「部」，写章时按阶段注入评分标准与锚点）{C_0}")
-    print("   默认 3 阶段：①开端(1~10章) ②发展(11~25章) ③终局(26~{}章)".format(total_chapters))
+    print("   默认 3 阶段：①开端(1~10章) ②发展(11~25章) ③结局(26~{}章)".format(total_chapters))
     custom = ask("   要自定义吗？[回车=用默认 / 输入阶段数]", "").strip()
     n = int(custom) if custom.isdigit() and int(custom) > 0 else 3
 
     stages = []
     if n == 3 and not custom:
         defaults = [(1, 10), (11, min(25, total_chapters)), (min(26, total_chapters + 1), total_chapters)]
-        names = ["开端", "发展", "终局"]
+        names = ["开端", "发展", "结局"]
     else:
         # 每个阶段的起止章都手填（傻瓜式：显示可用区间，回车=自动续排）
         defaults = []
