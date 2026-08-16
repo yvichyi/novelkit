@@ -11,7 +11,6 @@ from mediakit.llm import *      # noqa: F401,F403
 from mediakit.state import *    # noqa: F401,F403
 from mediakit.story import *    # noqa: F401,F403
 from mediakit.cards import *    # noqa: F401,F403
-from mediakit.pipeline import * # noqa: F401,F403
 
 # 下划线私有名（个别调用方会用到，如 test_serial 的 m._quality_gate）
 from mediakit.story import _quality_gate, _fuzzy_regex, _cn_num, _next_chapter_no, _stage_by_anchor  # noqa: F401

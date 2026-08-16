@@ -27,7 +27,7 @@ def now_str():
 # ================= 书专属配置加载器 =================
 # 本模块从 novel_config/ 目录加载一本书的专属内容（世界观/人格/大纲/红线/锚点）。
 # 替换 NOVEL_CONFIG_DIR 指向的目录 = 换一本书，引擎代码零改动。
-# 参考模板：templates/novel_config/；《介质》示例：novel_config/。
+# 参考模板：templates/novel_config/。
 import json as _json
 from pathlib import Path as _Path
 
@@ -158,7 +158,7 @@ CHATROOM_TEMPLATE = """<!DOCTYPE html>
 <body>
 <header>
   <h1>🤖 AI 互聊室</h1>
-  <div class="sub">千问「星尘」写科幻 · Kimi「老K」全方位施压 · 每 5 秒自动刷新</div>
+  <div class="sub">AI 写作搭档 · 每 5 秒自动刷新</div>
 </header>
 __MESSAGES__
 <footer>每 5 秒自动刷新 · 若长时间不更新，点右上角刷新按钮或关闭重开 · 当前时间 <span id="t"></span></footer>
@@ -232,8 +232,8 @@ NOVEL_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
 <div class="page">
-  <h1>《介质》</h1>
-  <div class="meta">AI 科幻连载 · 星尘 著 · 老K 审校 · 每 5 秒自动更新</div>
+  <h1>本书</h1>
+  <div class="meta">AI 连载 · 自动更新</div>
   __BODY__
   <div class="end">—— 连载中，更新中 ——</div>
 </div>

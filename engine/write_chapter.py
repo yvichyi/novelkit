@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""《介质》正史写作脚本（第3章起批量写 · 分层大纲 · 三层开关 · 后期切 pro）
+"""正史写作脚本（第3章起批量写 · 分层大纲 · 三层开关 · 后期切 pro）
 
 三层开关（默认最保守 = preview + confirm + write 1）：
   --preview    只打印 prompt，不发 API、不写文件（零成本预览）
@@ -8,7 +8,7 @@
   --write N    一次只写 N 章就停（默认 1）
 
 后期策略：
-  --pro-from N 第 N 章起用 deepseek-v4-pro（默认 181=分裂期起），之前用 flash
+  --pro-from N 第 N 章起用 deepseek-v4-pro（默认 181=后期起），之前用 flash
 
 缓存设计（防重复计费）：
   每章用「干净上下文」= [system persona 固定] + [user 完整 prompt]。
@@ -60,13 +60,13 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parent.parent          # 默认《介质》数据根（ledger/已发布正文 所在）
-# 双模式 BASE 修正（通用仓库布局）：本目录和父目录都没有《介质》数据时，工作根收敛到本目录，
+BASE = Path(__file__).resolve().parent.parent          # 默认数据根（ledger/已发布正文 所在）
+# 双模式 BASE 修正（通用仓库布局）：本目录和父目录都没有默认书数据时，工作根收敛到本目录，
 # 避免 clone 到任意位置后误读别人的 01_正史账本/已发布正文
 if not (BASE / "已发布正文").exists() and not (Path(__file__).resolve().parent / "已发布正文").exists():
     BASE = Path(__file__).resolve().parent
 # 通用模式：NOVEL_DIR 指向新书目录（含 novel_config/ 和运行时目录）。
-# 不设置 = 走《介质》默认路径（零影响）。
+# 不设置 = 走默认路径（零影响）。
 NOVEL_DIR = os.environ.get("NOVEL_DIR", "")
 if NOVEL_DIR:
     _nd = Path(NOVEL_DIR)
@@ -88,7 +88,7 @@ else:
 FUSED_DIR = (Path(NOVEL_DIR) / "已发布正文_熔断待修") if NOVEL_DIR else (BASE / "已发布正文_熔断待修")  # 熔断正文不丢弃，存这里供手动修复/复用
 
 BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-PRO_FROM_DEFAULT = 181   # 分裂期起切 pro
+PRO_FROM_DEFAULT = 181   # 后期起切 pro
 RECENT_FULL = 8          # 前文滚动窗口：只保留最近 N 章全文，更早的靠正史卡（状态卡+事件表+伏笔账本）兜底，防 prompt 无限膨胀
 
 
@@ -145,7 +145,7 @@ def red_line_table():
 
 def refresh_dashboard():
     """每落盘一章自动重生成仪表盘（手机浏览器 30 秒自动刷新即可看到最新进度）。
-    通用模式（NOVEL_DIR）没有《介质》报告目录，跳过刷新。"""
+    通用模式（NOVEL_DIR）没有报告目录，跳过刷新。"""
     if NOVEL_DIR:
         return
     try:
@@ -183,7 +183,7 @@ def progress_line():
         stage, _, _ = stage_of_chapter(n)
     except Exception:
         stage = "?"
-    stage_zh = {"混沌期": "混沌", "清理期": "清理", "分裂期": "分裂", "共存期": "共存", "终局": "终局"}.get(stage, stage)
+    stage_zh = stage
     return f"已发布 {len(chs)} 章 ｜ 当前时代·{stage_zh} ｜ 下一章 = 第{n}章"
 
 
@@ -209,14 +209,15 @@ def ledger_cards():
 
 def faction_card(ch_no):
     """⑩·五 势力/派系设定（阶段门禁：早期阶段不注入防泄露后期概念）
-    通用模式：novel_config/faction.md；《介质》模式：ledger/九派系设定.md"""
+    优先读 novel_config/faction.md；默认模式读 ledger/派系设定.md"""
     stage, _, _ = m.stage_of_chapter(ch_no)
-    if stage in ("混沌期", "清理期"):
+    _first_stage = m.STAGE_ANCHORS[0][0] if m.STAGE_ANCHORS else None
+    if stage == _first_stage:   # 第一个阶段不注入派系（防泄露后期概念）
         return ""
     if NOVEL_DIR:
         t = read_text(Path(NOVEL_DIR) / "novel_config" / "faction.md").strip()
     else:
-        t = read_text(LEDGER / "九派系设定.md")
+        t = read_text(LEDGER / "派系设定.md")
     label = "当前阶段起可用" if stage == "全篇" else f"{stage}起可用"
     return f"【势力/派系设定（{label}）】\n{t}" if t else ""
 
@@ -326,7 +327,7 @@ def build_prompt(ch_no):
         m.build_stage_guide(ch_no),                        # ⑩ 当前评分标准
         ledger_cards(),                                    # ⑪ 当前状态（正史卡）
     ]
-    fac = faction_card(ch_no)                              # ⑪·五 九派系设定（分裂期起才注入）
+    fac = faction_card(ch_no)                              # ⑪·五 势力/派系设定（前期不注入）
     if fac:
         parts.append(fac)
     review_fb = load_last_review(ch_no)                        # ⑪·六 A1 评审闭环：上章整改清单
@@ -361,8 +362,8 @@ def build_task_instruction(ch_no):
 
 
 def score_quality(text, check_apocalypse=True):
-    """体检：只答"对/错"（有没有病），不答"好/不好"。返回 checks 字典（人称/元话语/末世有人）。
-    check_apocalypse=False 时跳过「末世有人」检查（通用书不是末世题材时用）。"""
+    """体检：只答"对/错"（有没有病），不答"好/不好"。返回 checks 字典（人称/元话语/环境有人）。
+    check_apocalypse=False 时跳过「环境有人」检查（通用书不是特定题材时用）。"""
     checks = {}
     # 人称纪律（叙述区禁"我"，台词受保护）
     nar = re.sub(r"[“「『].*?[”」』]", "", text, flags=re.S)
@@ -371,10 +372,10 @@ def score_quality(text, check_apocalypse=True):
     # 元话语（创作过程字眼）
     meta = re.findall(r"老K|清单第|评审|写作思路|创作说明|修改如下|待续|本章完|（示例|例如", text)
     checks["元话语"] = "FAIL" if meta else "PASS"
-    # 末世有人（每章至少一处「人的痕迹」；仅末世题材检查）
+    # 环境有人（每章至少一处「人的痕迹」；仅特定题材检查）
     if check_apocalypse:
-        people = re.findall(r"逃难|尸体|尸骸|遗骸|失控者|幸存者|人声|广播|尖叫|火光|炊烟|人潮|人群|路人|小孩|老人|妇女|有人|遗物|血迹", text)
-        checks["末世有人"] = "PASS" if people else "WARNING"
+        people = re.findall(r"逃难|尸体|尸骸|遗骸|人声|广播|尖叫|火光|炊烟|人潮|人群|路人|小孩|老人|妇女|有人|遗物|血迹|呼喊", text)
+        checks["环境有人"] = "PASS" if people else "WARNING"
     return checks
 
 
@@ -404,12 +405,7 @@ def check_chapter(text, ch_no):
         tips.append(f"字数偏少 {chars} 字（<1200）")
     elif chars > 3500:
         tips.append(f"字数偏多 {chars} 字（>3500）")
-    # 时间推进（软提示，不熔断）：按事件分章，用暗示标记，不机械写"第X天"（仅《介质》五阶段检查）
     stage, _, _ = m.stage_of_chapter(ch_no)
-    if stage in ("混沌期", "清理期", "分裂期", "共存期", "终局"):
-        head = text[:400]
-        if re.search(r"异常期第\s*[0-9一二三四五六七八九十]+\s*天|失控期第\s*[0-9一二三四五六七八九十]+\s*周", head):
-            tips.append("时间标注偏机械（写了'第X天'），建议改用事件/光线/身体暗示标记")
     # 后期词黑名单（带语境豁免）
     black = m.LATE_STAGE_BLACKLIST.get(stage, [])
     hits = []
@@ -427,20 +423,12 @@ def check_chapter(text, ch_no):
     if hits:
         fatal.append(f"后期词泄露（{stage}禁词）：{'、'.join(hits[:6])}")
     # 体检
-    checks = score_quality(text, check_apocalypse=stage in ("混沌期", "清理期", "分裂期", "共存期", "终局"))
+    checks = score_quality(text, check_apocalypse=False)   # 通用引擎：不按具体作品的阶段强制题材检查
     for k, v in checks.items():
         if v == "FAIL":
             fatal.append(f"体检FAIL·{k}")
         elif v == "WARNING":
             tips.append(f"体检WARNING·{k}")
-    # 硬核锚点（仅《介质》五阶段检查物理/推演术语；通用书的阶段=开端/发展/终局，跳过——用评分兜底）
-    if stage in ("混沌期", "清理期", "分裂期", "共存期", "终局"):
-        if stage == "混沌期":
-            anchors = re.findall(r"推演|潜热|凝结核|露点|比热容|热力学|纳维|麦克斯韦|伯努利|卡诺|相变|压力梯度|凝结|蒸发|临界点|过冷|对流", text)
-        else:
-            anchors = re.findall(r"熵债|编译|推演|叠加场|临界点|潜热|凝结核|露点|比热容|热力学|纳维|麦克斯韦|伯努利|卡诺|作用范围|排放点|相变|压力梯度", text)
-        if not anchors:
-            tips.append("硬核锚点缺失（无物理/推演术语，主角没用知识做事的痕迹）")
     return fatal, tips
 
 
@@ -593,7 +581,7 @@ async def polish_chapter(ch_no, draft, key, model_id):
     try:
         client = m.LLMClient("润色", "qwen", m.C_QWEN, BASE_URL, key, model_id, m.QWEN_PERSONA, max_history=0)
         stage, _, _ = m.stage_of_chapter(ch_no)
-        book_name = Path(NOVEL_DIR).name if NOVEL_DIR else "介质"
+        book_name = Path(NOVEL_DIR).name if NOVEL_DIR else "本书"
         stage_label = "" if stage == "全篇" else f"（{stage}时代）"
         voice_line = ("保持主角「情绪化的探索者」声音（会惊叹会吐槽会算账，不写成冷静机器）"
                       if NOVEL_DIR and stage != "全篇" else
@@ -713,7 +701,7 @@ async def write_one_chapter(ch_no, args, key, model_id):
 
 
 async def main():
-    ap = argparse.ArgumentParser(description="《介质》正史写作脚本")
+    ap = argparse.ArgumentParser(description="正史写作脚本（通用引擎）")
     ap.add_argument("--preview", action="store_true", help="只打印 prompt 不发 API")
     ap.add_argument("--confirm", action="store_true", help="每章写完后暂停确认")
     ap.add_argument("--write", type=int, default=1, help="一次写 N 章（默认1）")
@@ -729,7 +717,7 @@ async def main():
     if smart:
         print()
         print("╔══════════════════════════════════════════╗")
-        book_name = Path(NOVEL_DIR).name if NOVEL_DIR else "介质"
+        book_name = Path(NOVEL_DIR).name if NOVEL_DIR else "本书"
         print(f"║   《{book_name}》写作助手 · 傻瓜模式        ║")
         print("╚══════════════════════════════════════════╝")
         print(f"📊 {progress_line()}")

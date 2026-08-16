@@ -258,7 +258,7 @@ def extract_rewrite_request(review):
     return n, req
 
 def clean_story_text(text):
-    """把星尘的输出清理成纯小说正文：剥掉应答词、创作说明、与老K对话的痕迹"""
+    """把 AI 输出清理成纯小说正文：剥掉应答词、创作说明、与评审对话的痕迹"""
     t = (text or "").strip()
     # 剥掉括号内的创作说明
     t = re.sub(r"（[^）]*?(创作说明|写作思路|本章完|待续|下章|存稿|草稿)[^）]*?）", "", t)
@@ -364,21 +364,23 @@ def count_terms(text):
     return n, found
 
 def _stage_by_anchor(anchor_no):
-    """按锚号反查阶段名（锚1~8=混沌期，9~18=清理期，19~29=分裂期，30~36=共存期，37~40=终局）"""
+    """按锚号反查阶段名（从 anchors.json 的 STAGE_ANCHORS 动态反查）"""
     for name, a_lo, a_hi, ch_lo, ch_hi in STAGE_ANCHORS:
         if a_lo <= anchor_no <= a_hi:
             return name
-    return "混沌期"
+    if STAGE_ANCHORS:
+        return STAGE_ANCHORS[-1][0]
+    return "全篇"
 
 def _quality_gate(outdir, text, story_file, anchor_no=None):
     """B3~B9 质量门禁：落盘前硬校验，返回 (ok, issues)
     B3 文本污染扫描：孤引号/编号残留/常见错字
-    B4 时间线核对：异常期第X天单调递增
+    B4 时间线核对：第N天单调递增（若有）
     B5 标题纪律：章节必须有「第X章」+副标题（缺副标题=标记）
     B6 字数纪律：1500~3000 字区间外=标记（不拦截防误伤）
     B7 反雷同黑名单=熔断（污染词禁现）
     B8 现实定律术语密度（<2 警告不拦截）
-    B9 设定/大纲契合度：锚推进+设定运用+时间锚点（按阶段：混沌期=异常期第X天/失控期第X周，清理期=清理期第X年/月，分裂期/共存期=第X年，终局=终局第X月）+柯德声音+末世氛围，缺失≥2项=熔断；结尾钩子=警告
+    B9 设定/大纲契合度：锚推进+设定运用+时间锚点+主角声音+氛围，缺失≥2项=熔断；结尾钩子=警告
     anchor_no：当前锚号（None=跳过锚推进检查，如非锚驱动流程）
     """
     issues = []
@@ -396,14 +398,14 @@ def _quality_gate(outdir, text, story_file, anchor_no=None):
     if re.search(r'[）」]（(?:原句|与：|前一段|删掉|补足|建议|这里|原文)', text):
         issues.append("B3 文本污染：评审注水混入正文（（原句/与：/删掉…）这类创作注释）")
 
-    # B4 时间线核对（只查每章章首的时间标记「异常期第X天」，避免把回忆/插叙当回退）
+    # B4 时间线核对（只查每章章首的时间标记「第X天」，避免把回忆/插叙当回退）
     if story_file.exists():
         whole = story_file.read_text(encoding="utf-8") + "\n\n" + text
-        # 每章开头（## 第X章 标题 后第一处「异常期第X天」）
+        # 每章开头（## 第X章 标题 后第一处「第X天」）
         days = []
         for ch_m in re.finditer(r'^##\s+第\d+章[^\n]*\n(.*?)(?=^##\s+第\d+章|\Z)', whole, re.M | re.S):
             head = ch_m.group(1)
-            dm = re.search(r'异常期第(\d+)天', head[:200])  # 只查章首200字
+            dm = re.search(r'第(\d+)天', head[:200])  # 只查章首200字
             if dm:
                 days.append(int(dm.group(1)))
         if days:
@@ -439,15 +441,15 @@ def _quality_gate(outdir, text, story_file, anchor_no=None):
     # B8 现实定律术语密度（硬核特色，每章至少2处定律/科学名词；低于=警告不拦截防硬塞）
     tn, tset = count_terms(text)
     if tn < 2:
-        issues.append(f"B8 术语密度不足：仅{tn}处现实定律/科学名词（目标≥2处，如纳维-斯托克斯/麦克斯韦/伯努利/卡诺/潜热/雷诺数）")
+        issues.append(f"B8 术语密度不足：仅{tn}处现实定律/科学名词（目标≥2处，如热力学第二定律/能量守恒/相对论/流体力学）")
 
     # B9 设定/大纲契合度（v2.8 分级：时间锚点=S级熔断；锚推进/设定运用/声音/氛围/钩子=软指标只提示/警告）
     # 依据：ChatGPT 方案评审共识——"关键词命中"不单独判定文学质量，熔断只用于 S 级错误（时间线/正史）。
     # 写跑题由主编/人工判断，不以"命中几个关键词"代替真审读（deepseek-v4-pro 第247章关键词误杀教训）。
     if anchor_no is not None:
         # ③ 时间锚点：S级硬规则（时间线=正史，缺失=熔断，唯一保留的 B9 熔断项）
-        if not re.search(r'(异常期|失控期|崩塌期|剧变期|清理期|分裂期|共存期|终局)第\s*[0-9一二两三四五六七八九十百千]+\s*(天|周|月|年)|第\s*[0-9一二两三四五六七八九十百千]+\s*天\b', text[:300]):
-            issues.append("B9 契合度熔断：时间锚点缺失（章首300字内未交代当前时间，如 分裂期第2年/异常期第3天）")
+        if not re.search(r'第\s*[0-9一二两三四五六七八九十百千]+\s*(天|周|月|年)', text[:300]):
+            issues.append("B9 契合度熔断：时间锚点缺失（章首300字内未交代当前时间，建议写「第N天/第N周」类时间标记）")
         # ① 锚推进：A级软指标（关键词命中只提示，不熔断——是否真推进由主编/人工判定）
         _kws = ANCHOR_KEYWORDS.get(anchor_no, [])
         if _kws:
@@ -459,101 +461,30 @@ def _quality_gate(outdir, text, story_file, anchor_no=None):
         _sw = STAGE_SETTING_WORDS.get(_stage, [])
         if _sw and not any(w in text for w in _sw):
             issues.append(f"B9 设定运用提示（{_stage}核心设定词零命中：{'/'.join(_sw[:5])}…；仅提示不拦截）")
-        # ④ 柯德声音：毒舌/吐槽/直率信号≥1（软查：文风问题不参与硬门禁——关键词表抓不到≠没声音，deepseek-r1误杀教训）
+        # ④ 主角声音：毒舌/吐槽/直率信号≥1（软查：文风问题不参与硬门禁——关键词表抓不到≠没声音）
         if not any(w in text for w in CODE_VOICE_WORDS):
-            issues.append("B9 柯德声音警告（关键词表未命中毒舌/吐槽/直率信号，请人工确认文风；仅警告，不拦截归档）")
-        # ⑤ 末世氛围：按阶段取词（混沌期=社会崩塌/生理基线；后期=该阶段氛围词）
-        # 先剔除阶段时间标记（"清理期第X年"里的"清理"不能算氛围词），防时间词误命中
-        _atm_text = re.sub(r"(混沌期|失控期|崩塌期|剧变期|清理期|分裂期|共存期|终局)第\s*[0-9一二两三四五六七八九十百千]+\s*(天|周|月|年)", "", text)
+            issues.append("B9 主角声音警告（关键词表未命中毒舌/吐槽/直率信号，请人工确认文风；仅警告，不拦截归档）")
+        # ⑤ 氛围：按阶段取词（先剔除阶段时间标记，防时间词误命中）
+        _stage_names = [r[0] for r in STAGE_ANCHORS]
+        _atm_text = re.sub(r"(?:%s)第\s*[0-9一二两三四五六七八九十百千]+\s*(?:天|周|月|年)" % "|".join(re.escape(x) for x in _stage_names), "", text)
         _aw = STAGE_ATMOS_WORDS.get(_stage, WASTE_ATMOS_WORDS)
         if not any(w in _atm_text for w in _aw):
-            issues.append(f"B9 氛围警告（{_stage}无该阶段氛围信号：{'/'.join(_aw[:6])}…；仅警告不拦截，请人工确认末世重量是否在线）")
+            issues.append(f"B9 氛围警告（{_stage}无该阶段氛围信号：{'/'.join(_aw[:6])}…；仅警告不拦截，请人工确认氛围浓度是否在线）")
         # ⑥ 结尾钩子（宽松信号，只警告不参与熔断计数）
         _tail = text[-200:]
         if not any(w in _tail for w in HOOK_SIGNAL_WORDS):
             issues.append("B9 结尾钩子缺失（末200字无悬念信号：忽然/不对劲/危险/？/轰…）")
-
-    # B13 熵债机制硬查（熔断，v3禁写=错误机制）：编译代价写成"头痛/算力负荷/精神力/能量被抽"
-    # 注意排除合法语境：否定表述（"不是头痛"）、生理动作（"揉了揉太阳穴"）、日常生理反应（"太阳穴血管一跳"）
-    _suck_bad = [
-        r"头痛[，,、\s]{0,4}(?:像|如|欲裂|加剧|回来|还在|欲)",
-        r"头痛(?:欲裂|加剧|像|如)",
-        r"太阳穴[^。；，]{0,8}(?:痛|胀痛|刺痛|发紧|突突)",
-        r"(?:捅|戳|刺|插|扎|钻)进?太阳穴|太阳穴(?:被|挨).{0,4}(?:捅|戳|刺|插|扎)",
-        r"算力(?:负荷|发沉|被抽|耗尽)",
-        r"(?:消耗|耗掉|抽干).{0,4}(?:精神力|脑力|精力)",
-        r"能量(?:从身体|被身体|被抽走|抽干)",
-        r"脑(?:子|袋)?(?:沉重|浆|被烧)",
-        r"身体过载|凭空疲劳",
-    ]
-    _suck_hit = None
-    for _pat in _suck_bad:
-        for _mm in re.finditer(_pat, text):
-            _ctx = text[max(0, _mm.start()-12):_mm.end()+12]
-            # 合法语境豁免：否定/疑问/动作/生理（血管跳/揉了揉/对准）
-            if re.search(r"(不是|不算|没有|哪|谁|怎么|难道|揉|按|摸|指|对准|举起|血管)", _ctx):
-                continue
-            _suck_hit = _mm.group(0)
-            break
-        if _suck_hit:
-            break
-    if _suck_hit:
-        issues.append(f"B13 熵债机制熔断：出现旧版抽能写法「{_suck_hit}」（编译代价=头痛/算力负荷/精神力=硬伤，v3禁写；正确=环境落账+推演难度感）")
-
-    # B14 后期概念词熔断（名词时代错位）：当前阶段出现更晚阶段的正式概念词=硬伤
-    # 词表按阶段：只禁"当前阶段不该正式出现"的强概念词；传闻/预告/描述性用法由F门禁放行
-    if anchor_no is not None:
-        _stage_b14 = _stage_by_anchor(anchor_no)
-        _late_by_stage = {
-            "混沌期": ["复制人", "防火墙", "量子信道", "量子加密", "负熵流配额", "静默区", "元规则", "模因", "锁杀", "信标链", "信标源", "工程战", "悬空城", "巨构", "派系武装", "卡门线", "超级风暴", "断洋流", "大气程序", "宜居带", "积雨云平台", "气候穹顶", "地幔据点", "ZERO", "环境神", "八派", "钟楼", "故土", "复归会", "黎明派", "锚派", "断点派", "新纪元派", "介质层", "环境接口", "纳米探针", "无线电力", "逆向推导"],
-            "清理期": ["复制人", "防火墙", "量子信道", "量子加密", "负熵流配额", "静默区", "元规则", "模因", "锁杀", "信标链", "信标源", "工程战", "悬空城", "巨构", "派系武装", "卡门线", "超级风暴", "断洋流", "大气程序", "宜居带", "积雨云平台", "气候穹顶", "地幔据点", "ZERO", "环境神", "八派", "钟楼", "故土", "复归会", "黎明派", "锚派", "断点派", "新纪元派", "介质层", "环境接口", "纳米探针", "无线电力", "逆向推导"],
-            "分裂期": ["悬空城", "卡门线", "超级风暴", "断洋流", "模因", "元规则", "锁杀", "环境神", "回滚", "Lv3", "模因战", "大气程序", "积雨云平台", "气候穹顶", "地幔据点", "ZERO"],
-            "共存期": ["断洋流", "回滚", "全球性攻击", "卡门线", "锁杀"],
-            "终局": [],
-        }
-        _late_words = _late_by_stage.get(_stage_b14, [])
-        # B14 比喻豁免：禁词若出现在「编程/比喻语境」（同句含无日志/无报错/服务器/编译/代码/接口等），
-        # 视为柯德的认知比喻（合法），不熔断；作为正式概念/实体/组织名出现（无比喻词）才熔断。
-        _metaphor_ctx = {
-            "环境接口": ["无日志", "无报错", "无UI", "服务器", "接口", "编译", "代码", "生产环境", "测试环境", "README", "文档", "像", "仿佛", "比喻"],
-            "介质层": ["像", "仿佛", "比喻", "内核", "底层"],
-            "信标": ["像", "仿佛", "比喻", "信号塔", "灯塔"],
-            "主控室": ["像", "仿佛", "比喻", "驾驶舱"],
-        }
-        _late_hit = []
-        for _w in _late_words:
-            _meta_kw = _metaphor_ctx.get(_w)
-            if _meta_kw:
-                _pos = 0
-                _is_meta_all = True   # 该禁词所有出现均须命中比喻词才放行
-                while True:
-                    _i = text.find(_w, _pos)
-                    
-                    if _i == -1:
-                        break
-                    _seg = text[max(0, _i - 10): _i + len(_w) + 10]
-                    if not any(_k in _seg for _k in _meta_kw):
-                        _is_meta_all = False   # 存在非比喻用法 → 正式概念 → 熔断
-                        break
-                    _pos = _i + len(_w)
-                if not _is_meta_all:
-                    _late_hit.append(_w)
-            else:
-                if _w in text:
-                    _late_hit.append(_w)
-        if _late_hit:
-            issues.append(f"B14 {_stage_b14}后期概念词熔断：出现后期概念词「{'、'.join(_late_hit[:5])}」（{_stage_b14}名词=认知上限，后期词=时代错位硬伤；只可作描述性动词或传闻，不可作正式概念）")
 
     # B12 战斗机动性软查（点名不熔断）：战斗/攻防锚（6/13/15/29/37/38/39）要求动态机动信号
     # 防"站桩对轰"：战斗=移动中完成（追击/缠斗/借地形/借气流），禁止面对面互砸
     _battle_anchors = {6, 13, 15, 29, 37, 38, 39}
     if anchor_no in _battle_anchors:
         _battle_sig = re.findall(r"追击|缠斗|脱战|闪避|俯冲|爬升|滑翔|借风|借气流|热气流|急流|绕到|侧翼|拉开距离|突进|后退|移位|腾空|落地|翻滚|奔跑|冲向|撤离|包抄", text)
-        _attack_sig = re.findall(r"热浪|风墙|水刀|应力|裂纹|塌|掀翻|冲击|注入|干扰|补丁|读模型|推演|烧债|烧钱|算账", text)
+        _attack_sig = re.findall(r"热浪|风墙|水刀|应力|裂纹|塌|掀翻|冲击|注入|干扰|推演|代价|对抗", text)
         if _attack_sig and not _battle_sig:
             issues.append("B12 战斗机动性警告：有攻防动作但无动态机动信号（追击/闪避/借气流/移位）——战斗=移动中完成，禁止站桩对轰，建议补机动维度")
 
-    # B11 尺度震撼检查（软查点名，不熔断）：巨构/灾难/决战锚（25/26/27/34/35/36/37/38）
+    # B11 尺度震撼检查（软查点名，不熔断）：宏大/灾难/决战锚（25/26/27/34/35/36/37/38）
     # 要求：宏大量级必须给"画面轨换算"（步行/小时/类比/当量/对比）或"宏观感官锚点"（尺寸+声音/温度/光）
     # 防"三百公里长墙"只给概念不给体感（好看五杠杆·画面缺失=点名）
     _scale_anchors = {25, 26, 27, 34, 35, 36, 37, 38}
@@ -562,12 +493,12 @@ def _quality_gate(outdir, text, story_file, anchor_no=None):
         _scale_sense = re.findall(r"嗡|轰鸣|震颤|震动|阴影|光晕|热浪|低温|寒风|风压|气压|臭氧|金属|锈|雷鸣|轰", text)
         _macro = re.findall(r"公里|千米|万吨|亿吨|千米高|公里长|米高|塔|墙|城|风暴|裂谷|海啸|大陆|垂直|贯穿|遮天", text)
         if not _scale_conv and not _scale_sense:
-            issues.append("B11 尺度震撼警告：本锚含巨构/灾难/决战场景，但正文无尺度换算（步行/电梯/类比/当量）也无宏观感官锚点（尺寸+声音/温度/光）——只有概念没画面=点名")
+            issues.append("B11 尺度震撼警告：本锚含宏大/灾难/决战场景，但正文无尺度换算（步行/电梯/类比/当量）也无宏观感官锚点（尺寸+声音/温度/光）——只有概念没画面=点名")
         elif _macro and not _scale_conv:
             issues.append("B11 尺度震撼警告：出现宏大量级（" + "、".join(list(dict.fromkeys(_macro))[:3]) + "）但无画面轨换算——建议补人类经验锚点（步行多久/像什么/当量多少），只给抽象数字=点名")
 
     # B10 物理自洽熔断（防编程奇幻：无物理定律支撑的超现实创意=废稿，硬核是底线）
-    # 视角分级（v2，比喻修辞合法——柯德/角色的台词/内心里的编程比喻=特色放行；
+    # 视角分级（v2，比喻修辞合法——角色台词/内心里的编程比喻=特色放行；
     # 叙述层把环境/存在直接写成运行中的程序=机制落地=熔断）
     def _in_dialog(txt, pos):
         """判断位置是否在台词区（引号内）——台词区=角色说话=比喻/吐槽合法"""
@@ -583,10 +514,10 @@ def _quality_gate(outdir, text, story_file, anchor_no=None):
     _phant_hits = []
     for _m in re.finditer(
             r"格式化工具|系统管理员|管理员权限|无限权限|意识上传|意识外包|外部计算单元|代码成精|"
-            r"进化出自我意识|进化出意识|把自己编译成|皮肤表面浮现出.{0,14}代码|皮肤.{0,10}十六进制|被格式化|格式化成|"
+            r"进化出自我意识|进化出意识|把自己变成程序|皮肤表面浮现出.{0,14}代码|皮肤.{0,10}十六进制|被格式化|格式化成|"
             r"身体.{0,6}(JSON|数据库|临时表|数据块|数据结构)", text):
         if _in_dialog(text, _m.start()):
-            continue  # 台词区=角色吐槽比喻，合法（柯德是程序员，这是特色）
+            continue  # 台词区=角色吐槽比喻，合法（程序员主角的特色）
         if _is_meta(text, _m.start(), _m.end()):
             continue  # 叙述层但有明确比喻标记=合法修辞
         # 硬盘分区比喻豁免（「世界分成几块硬盘/不想被格式化就选个分区」=合法暗喻）
@@ -609,7 +540,7 @@ def _quality_gate(outdir, text, story_file, anchor_no=None):
             if pos >= 0 and not _in_dialog(text, pos) and not _is_meta(text, pos, pos+len(a)):
                 _abs_real.append(a)
         if _abs_real:
-            issues.append(f"B10 抽象落地警告：叙述层把环境写成程序实体（{'、'.join(list(dict.fromkeys(_abs_real))[:4])}）——编程比喻只许在柯德台词/内心，叙述层机制落地=奇幻倾向，请改回物理机制（量子层/熵债/推演）")
+            issues.append(f"B10 抽象落地警告：叙述层把环境写成程序实体（{'、'.join(list(dict.fromkeys(_abs_real))[:4])}）——编程比喻只许在角色台词/内心，叙述层机制落地=奇幻倾向，请改回物理机制")
         # 软词：光球/幽灵式拟人化异常体 + 操作语境（有意识/会/进化/学习/情绪…）
         for _m in re.finditer(r"光球|幽灵|递归幽灵", text):
             _s = max(0, _m.start()-20); _e = min(len(text), _m.end()+30)
@@ -617,13 +548,13 @@ def _quality_gate(outdir, text, story_file, anchor_no=None):
             if re.search(r"像|仿佛|如|比喻", _ctx):
                 continue  # 比喻语境放行
             if re.search(r"意识|会|进化|学习|预测|脉冲|打招呼|情绪|住进|藏在.{0,4}(脑|意识)|斐波那契", _ctx):
-                issues.append(f"B10 物理自洽熔断：『{_m.group(0)}』被写成拟人化有意识体（缺物理支撑）——异常体只能是有明确物理机制的现象（介质层量子进程/失稳锚点），禁止代码成精")
+                issues.append(f"B10 物理自洽熔断：『{_m.group(0)}』被写成拟人化有意识体（缺物理支撑）——异常体只能是有明确物理机制的现象，禁止代码成精")
                 break
 
     return issues
 
 def append_story(outdir, text, anchor_no=None):
-    """把星尘的正文追加到 故事正文.md，按章编号（AI 自带章号则标准化，短回复不编号附到当前章）
+    """把 AI 正文追加到 故事正文.md，按章编号（AI 自带章号则标准化，短回复不编号附到当前章）
     B1 章号守卫：AI 报的章号 ≠ 程序期望号时，强制用期望号+保留副标题落盘，杜绝跳号/重号。
     B2 人称消毒：落盘前强制第三人称（保护台词区），叙述区「我」不落盘。
     B7/B9 熔断：反雷同黑名单或契合度缺失≥2项 = 该章丢弃不落盘（写 .b7_blocked 触发重写轮）"""
@@ -646,7 +577,7 @@ def append_story(outdir, text, anchor_no=None):
                         if i.startswith("B7") or (i.startswith("B9") and "熔断" in i)]
             if _b_fatal:
                 log(f"🛑 质量门禁熔断：本章不合格（{'；'.join(_b_fatal)}），已丢弃不落盘，需重写。", C_WARN)
-                # 把丢弃事件记录到全局（run_loop 可据此要求星尘重写）
+                # 把丢弃事件记录到全局（run_loop 可据此要求 AI 重写）
                 try:
                     _f = outdir / ".b7_blocked"
                     with open(_f, "a", encoding="utf-8") as f:
@@ -702,7 +633,7 @@ def render_novel(outdir):
                 parts.append(f'<p>{html.escape(line)}</p>')
         body = "\n".join(parts)
         (outdir / "小说.html").write_text(
-            NOVEL_TEMPLATE.replace("__TITLE__", "《介质》· 小说正文").replace("__BODY__", body),
+            NOVEL_TEMPLATE.replace("__TITLE__", "小说正文").replace("__BODY__", body),
             encoding="utf-8")
     except Exception as e:
         log(f"⚠ 小说渲染失败：{e}", C_WARN)
@@ -740,7 +671,7 @@ def read_recent_chapters(outdir, n=3, max_chars=8000):
         return ""
 
 def extract_story_position(text):
-    """P2：从星尘输出中提取【本章定位】区块（仅3行元信息，不进正文）"""
+    """P2：从 AI 输出中提取【本章定位】区块（仅3行元信息，不进正文）"""
     m = re.search(r"【本章定位】\s*(.*?)(?:\n\n|\Z)", text or "", re.S)
     if not m:
         return ""

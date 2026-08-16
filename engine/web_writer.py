@@ -3,10 +3,10 @@
 """web_writer.py —— 手机网页版写作台（零依赖，纯标准库）
 
 打开手机浏览器 → 大按钮点按写作：
-  - 写《介质》下一章 / 写新书下一章（后台跑，进度实时滚动）
+  - 写默认书下一章 / 写新书下一章（后台跑，进度实时滚动）
   - 预览下一章 prompt（零成本）
   - 建新书（表单填写 + 可选 AI 生成设定）
-  - 读已写章节 / 看老K评审反馈
+  - 读已写章节 / 看 AI 评审反馈
   - 局域网内家人朋友手机/电脑也能连（同一 Wi-Fi）
 
 启动：  python3 web_writer.py            # 默认 8080 端口
@@ -32,8 +32,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 BOOKS_DIR = SCRIPT_DIR / "books"
 # 双模式 BASE（数据根判定）：
-#  1) 本目录下有 已发布正文/ → 本目录就是《介质》数据根（BASE=本目录）
-#  2) 父目录下有 已发布正文/ → 《介质》数据在父目录（原项目布局）
+#  1) 本目录下有 已发布正文/ → 本目录就是默认书数据根（BASE=本目录）
+#  2) 父目录下有 已发布正文/ → 默认书数据在父目录（原项目布局）
 #  3) 都没有 → 通用仓库模式：默认书为空，用户用 books/* 或 new_novel.py 建书
 if (SCRIPT_DIR / "已发布正文").exists():
     BASE = SCRIPT_DIR
@@ -139,10 +139,10 @@ def run_in_thread(tid, fn):
 def list_books():
     """返回 [{id, name, is_default, chapters, next_no, dir}]"""
     out = []
-    # 《介质》默认书
+    # 默认书（BASE 数据根）
     pub = BASE / "已发布正文"
     chs = sorted(pub.glob("第*章.md")) if pub.exists() else []
-    out.append({"id": "__default__", "name": "《介质》", "dir": str(SCRIPT_DIR),
+    out.append({"id": "__default__", "name": "默认书", "dir": str(SCRIPT_DIR),
                 "is_default": True, "chapters": len(chs), "next_no": len(chs) + 1})
     # books/ 下的新书
     if BOOKS_DIR.exists():
@@ -242,7 +242,7 @@ def strip_ansi(s):
 
 # ================= 写章 / 预览 =================
 def start_write(bid, count, key, pro_from=None, start=None):
-    t = new_task("write", f"写「{'《介质》' if bid=='__default__' else bid}」{count} 章" + (f"（从第{start}章）" if start else ""))
+    t = new_task("write", f"写「{'默认书' if bid=='__default__' else bid}」{count} 章" + (f"（从第{start}章）" if start else ""))
     d = book_dir(bid)
     env = {}
     if key:
@@ -260,7 +260,7 @@ def start_write(bid, count, key, pro_from=None, start=None):
 
 
 def start_preview(bid):
-    t = new_task("preview", f"预览「{'《介质》' if bid=='__default__' else bid}」下一章 prompt")
+    t = new_task("preview", f"预览「{'默认书' if bid=='__default__' else bid}」下一章 prompt")
     d = book_dir(bid)
     env = {}
     if bid != "__default__":
@@ -293,7 +293,7 @@ def start_newbook(name, intro, protagonist, total, use_ai, key, stages=None):
             hi = min(lo + ln - 1, total_n)
             if lo > total_n:
                 break
-            stages.append({"name": ["开端", "发展", "终局"][i] if i < 3 else f"阶段{i+1}",
+            stages.append({"name": ["开端", "发展", "结局"][i] if i < 3 else f"阶段{i+1}",
                            "ch_lo": lo, "ch_hi": hi, "desc": ""})
             lo = hi + 1
     def _fn():
@@ -554,7 +554,7 @@ PAGE = r"""<!DOCTYPE html>
     <input id="nbTotal" type="number" min="1" value="30" placeholder="总章数">
   </div>
   <label>阶段规划（每行一个「阶段名:起-止章」，留空=自动3阶段）</label>
-  <textarea id="nbStages" rows="3" placeholder="开端:1-10&#10;发展:11-25&#10;终局:26-30"></textarea>
+  <textarea id="nbStages" rows="3" placeholder="开端:1-10&#10;发展:11-25&#10;结局:26-30"></textarea>
   <label><input type="checkbox" id="nbAi" checked> 用 AI 生成世界观/大纲/脑洞/红线（需 Key，约1分钟）</label>
   <button class="sec" onclick="doNewBook()">🚀 创建新书</button>
   <div class="status" id="stNew"></div>
@@ -595,7 +595,7 @@ let pollId = null;
 const $ = id => document.getElementById(id);
 const esc = s => (s||"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const strip = s => (s||"").replace(/\x1b\[[0-9;]*m/g,"");
-const bookName = () => cur === "__default__" ? "《介质》" : cur;
+const bookName = () => cur === "__default__" ? "默认书" : cur;
 
 function setSt(id, msg, cls){ $(id).textContent = msg; $(id).className = "status " + (cls||""); }
 

@@ -7,5 +7,5 @@ llm     -> 模型层 + 记账
 state   -> 状态持久化
 story   -> 故事文件操作
 cards   -> 提示词卡片
-pipeline-> 主流程 + CLI
+cards-> 提示词卡片
 """
