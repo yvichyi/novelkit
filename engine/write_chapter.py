@@ -243,9 +243,10 @@ def foreshadow_card(ch_no):
         ledger_text = vp.read_text(encoding="utf-8").strip()
         if not ledger_text:
             return ""
-        # 大纲来源：优先新书 novel_config/outline.md，退回默认大纲常量
+        # 大纲来源：新书模式只读本新书的 outline.md（绝不回退默认书大纲，防跨书泄漏）；
+        # 默认模式读账本目录大纲，退回默认大纲常量
         if NOVEL_DIR:
-            outline_text = read_text(Path(NOVEL_DIR) / "novel_config" / "outline.md") or m.STORY_OUTLINE
+            outline_text = read_text(Path(NOVEL_DIR) / "novel_config" / "outline.md")
         else:
             outline_text = read_text(LEDGER / "大纲.md") or m.STORY_OUTLINE
         rec = fh.current_anchor_recovery(outline_text, ch_no)
@@ -254,8 +255,8 @@ def foreshadow_card(ch_no):
             # 账本存在但无待回收 → 极简占位防模型自由发挥埋支线
             return "【伏笔】当前无待回收伏笔；禁止新埋与主线无关的支线伏笔。"
         return card
-    except Exception as e:
-        return f"【伏笔卡（生成失败，降级提示）】{e}"
+    except Exception:
+        return "【伏笔卡（生成失败，降级为仅主线TOP3）】"
 
 
 def faction_card(ch_no):
@@ -598,18 +599,19 @@ def update_ledger(ch_no, review_text):
                     nm = ln2.split("｜", 1)[-1].split("|", 1)[-1].strip()
                     recovered.append(f"  - 已回收：{nm}")
                     continue
-                # 名称｜级别A/B/C｜主线/支线｜预计阶段（兼容旧格式 名称｜级别｜阶段 → 默认主线）
-                parts = re.split(r"[｜|]", ln2)
-                nm = parts[0].strip()
-                rest = [p.strip() for p in parts[1:] if p.strip()]
-                level = next((p for p in rest if p.upper() in ("A", "B", "C")), "")
-                mainline = next((p for p in rest if p in ("主线", "支线")), "主线")
-                plan = "·".join(p for p in rest if p not in (level, mainline))
-                label = "·".join(x for x in (f"级别{level}" if level else "",
-                                             mainline,
-                                             f"预计{plan}回收" if plan and not plan.endswith("回收") else (plan if plan else "")) if x)
-                entry = f"  - {nm}（{label}）" if label else f"  - {nm}"
-                (new_side if mainline == "支线" else new_main).append(entry)
+                # 名称｜级别A/B/C｜主线/支线｜预计阶段
+                # 复用 foreshadow 拆分器：兼容新格式（竖线分隔）与旧格式（名称（级别X·…；名称2·级别Y·支线·…）一行多伏笔）
+                from mediakit import foreshadow as _fh
+                for nm, level, mainline, plan in _fh._split_registered_line(ln2):
+                    if not nm:
+                        continue
+                    label = "·".join(x for x in (
+                        f"级别{level}" if level else "",
+                        mainline or "主线",
+                        f"预计{plan}回收" if plan and not plan.endswith("回收") else (plan if plan else ""),
+                    ) if x)
+                    entry = f"  - {nm}（{label}）" if label else f"  - {nm}"
+                    (new_side if (mainline == "支线") else new_main).append(entry)
             # 主线登记区：插在「## 回收记录」前；支线池：独立区块；回收记录：插在末尾区块前
             if new_main:
                 insert = f"\n## 第{ch_no}章 伏笔登记\n" + "\n".join(new_main) + "\n"

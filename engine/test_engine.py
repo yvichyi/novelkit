@@ -156,6 +156,29 @@ def t8_foreshadow():
     check("注入：含应收网", "应收网" in card and "会算的陌生人" in card and "必须回收" in card)
     check("注入：含主线TOP", "未回收主线伏笔" in card)
     check("注入：支线只给统计", "1 条支线伏笔未回收" in card, f"{card[-120:]}")
+    # 8.5 集成：write_chapter.foreshadow_card（临时书目录）
+    import write_chapter as w
+    td = Path(tempfile.mkdtemp())
+    (td / "novel_config").mkdir(parents=True)
+    (td / "ledger").mkdir()
+    (td / "ledger" / "伏笔账本.md").write_text(fake_ledger, encoding="utf-8")
+    (td / "novel_config" / "outline.md").write_text(outline, encoding="utf-8")
+    (td / "novel_config" / "world_setting.md").write_text("世界观：测试", encoding="utf-8")
+    saved = os.environ.get("NOVEL_DIR")
+    os.environ["NOVEL_DIR"] = str(td)
+    os.environ["NOVEL_CONFIG_DIR"] = str(td / "novel_config")
+    import importlib
+    importlib.reload(w)   # NOVEL_DIR 在 import 时读取，必须重载才生效
+    try:
+        c = w.foreshadow_card(12)
+        check("集成：新书模式读到应收网", "应收网" in c and "V-01" in c, f"{c[:120]}")
+    finally:
+        if saved:
+            os.environ["NOVEL_DIR"] = saved
+        else:
+            os.environ.pop("NOVEL_DIR", None)
+        os.environ.pop("NOVEL_CONFIG_DIR", None)
+        importlib.reload(w)
 
 
 def main():

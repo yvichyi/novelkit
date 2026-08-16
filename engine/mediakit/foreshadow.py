@@ -70,8 +70,9 @@ def _split_registered_line(raw):
         nm = parts[0]
         level = mainline = plan = ""
         for p in parts[1:]:
-            if p.upper() in ("A", "B", "C"):
-                level = p.upper()
+            p_clean = p.replace("级别", "").strip()
+            if p_clean.upper() in ("A", "B", "C"):
+                level = p_clean.upper()
             elif p in ("主线", "支线"):
                 mainline = p
             else:
@@ -108,6 +109,13 @@ def _split_registered_line(raw):
         pl = re.search(r"预计\s*([^·；;]+)", seg)
         if pl:
             plan = pl.group(1).strip("· ，,。")
+        else:
+            # 无'预计'前缀：取最后一个 · 段（如'下章内回收'/'3章内回收'）
+            _segs = [x.strip() for x in re.split(r"[·，,]", seg) if x.strip()]
+            if _segs:
+                _last = _segs[-1]
+                if "回收" in _last or "阶段" in _last:
+                    plan = _last
         mainline = "支线" if "支线" in seg else "主线"
         if name:
             out.append((name, level, mainline, plan))
@@ -218,7 +226,7 @@ def current_anchor_recovery(outline_text, ch_no):
     for i, hm in enumerate(heads):
         a_no = int(hm.group(1))
         title = hm.group(0)
-        tm = re.search(r"第\s*(\d+)\s*~\s*(\d+)\s*章", title)
+        tm = re.search(r"第\s*(\d+)\s*[~～\-—]\s*(\d+)\s*章", title)
         if tm:
             lo, hi = int(tm.group(1)), int(tm.group(2))
         else:
