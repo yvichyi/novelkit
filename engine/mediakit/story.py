@@ -11,7 +11,7 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
-from .config import ANCHOR_KEYWORDS, BANNED_EXEMPT, BANNED_PATTERN, CHATROOM_TEMPLATE, CODE_VOICE_WORDS, C_WARN, HOOK_SIGNAL_WORDS, NOVEL_TEMPLATE, STAGE_ANCHORS, STAGE_ATMOS_WORDS, STAGE_SETTING_WORDS, TERM_LAWS, WASTE_ATMOS_WORDS, _CHAPTER_TITLE_RE, _META_STRONG, log, now_str
+from .config import ANCHOR_KEYWORDS, BANNED_EXEMPT, BANNED_PATTERN, CHATROOM_TEMPLATE, CODE_VOICE_WORDS, C_WARN, HOOK_SIGNAL_WORDS, NOVEL_TEMPLATE, STAGE_ANCHORS, STAGE_ATMOS_WORDS, STAGE_SETTING_WORDS, TERM_LAWS, TIME_ANCHOR_RE_LOOSE, WASTE_ATMOS_WORDS, _CHAPTER_TITLE_RE, _META_STRONG, log, now_str
 
 
 def similarity(a, b):
@@ -440,7 +440,7 @@ def _quality_gate(outdir, text, story_file, anchor_no=None):
 
     # B8 现实定律术语密度（硬核特色，每章至少2处定律/科学名词；低于=警告不拦截防硬塞）
     tn, tset = count_terms(text)
-    if tn < 2:
+    if TERM_LAWS and tn < 2:
         issues.append(f"B8 术语密度不足：仅{tn}处现实定律/科学名词（目标≥2处，如热力学第二定律/能量守恒/相对论/流体力学）")
 
     # B9 设定/大纲契合度（v2.8 分级：时间锚点=S级熔断；锚推进/设定运用/声音/氛围/钩子=软指标只提示/警告）
@@ -448,8 +448,9 @@ def _quality_gate(outdir, text, story_file, anchor_no=None):
     # 写跑题由主编/人工判断，不以"命中几个关键词"代替真审读（deepseek-v4-pro 第247章关键词误杀教训）。
     if anchor_no is not None:
         # ③ 时间锚点：S级硬规则（时间线=正史，缺失=熔断，唯一保留的 B9 熔断项）
-        if not re.search(r'第\s*[0-9一二两三四五六七八九十百千]+\s*(天|周|月|年)', text[:300]):
-            issues.append("B9 契合度熔断：时间锚点缺失（章首300字内未交代当前时间，建议写「第N天/第N周」类时间标记）")
+        # 宽松版：认「X期第N天/第N天/自然时间词（凌晨/次日/暮色…）」——新书与重写版常用自然时间表达，只认硬纪年会误杀
+        if not TIME_ANCHOR_RE_LOOSE.search(text[:300]):
+            issues.append("B9 契合度熔断：时间锚点缺失（章首300字内未交代当前时间，如 第3天/第2周/清晨/入夜）")
         # ① 锚推进：A级软指标（关键词命中只提示，不熔断——是否真推进由主编/人工判定）
         _kws = ANCHOR_KEYWORDS.get(anchor_no, [])
         if _kws:
@@ -462,40 +463,35 @@ def _quality_gate(outdir, text, story_file, anchor_no=None):
         if _sw and not any(w in text for w in _sw):
             issues.append(f"B9 设定运用提示（{_stage}核心设定词零命中：{'/'.join(_sw[:5])}…；仅提示不拦截）")
         # ④ 主角声音：毒舌/吐槽/直率信号≥1（软查：文风问题不参与硬门禁——关键词表抓不到≠没声音）
-        if not any(w in text for w in CODE_VOICE_WORDS):
+        if CODE_VOICE_WORDS and not any(w in text for w in CODE_VOICE_WORDS):
             issues.append("B9 主角声音警告（关键词表未命中毒舌/吐槽/直率信号，请人工确认文风；仅警告，不拦截归档）")
         # ⑤ 氛围：按阶段取词（先剔除阶段时间标记，防时间词误命中）
         _stage_names = [r[0] for r in STAGE_ANCHORS]
         _atm_text = re.sub(r"(?:%s)第\s*[0-9一二两三四五六七八九十百千]+\s*(?:天|周|月|年)" % "|".join(re.escape(x) for x in _stage_names), "", text)
         _aw = STAGE_ATMOS_WORDS.get(_stage, WASTE_ATMOS_WORDS)
-        if not any(w in _atm_text for w in _aw):
+        if _aw and not any(w in _atm_text for w in _aw):
             issues.append(f"B9 氛围警告（{_stage}无该阶段氛围信号：{'/'.join(_aw[:6])}…；仅警告不拦截，请人工确认氛围浓度是否在线）")
         # ⑥ 结尾钩子（宽松信号，只警告不参与熔断计数）
         _tail = text[-200:]
         if not any(w in _tail for w in HOOK_SIGNAL_WORDS):
             issues.append("B9 结尾钩子缺失（末200字无悬念信号：忽然/不对劲/危险/？/轰…）")
 
-    # B12 战斗机动性软查（点名不熔断）：战斗/攻防锚（6/13/15/29/37/38/39）要求动态机动信号
+    # B12 战斗机动性软查（语义化，不依赖特定锚号）：正文出现攻防动作但无动态机动信号=点名
     # 防"站桩对轰"：战斗=移动中完成（追击/缠斗/借地形/借气流），禁止面对面互砸
     _battle_anchors = {6, 13, 15, 29, 37, 38, 39}
-    if anchor_no in _battle_anchors:
-        _battle_sig = re.findall(r"追击|缠斗|脱战|闪避|俯冲|爬升|滑翔|借风|借气流|热气流|急流|绕到|侧翼|拉开距离|突进|后退|移位|腾空|落地|翻滚|奔跑|冲向|撤离|包抄", text)
-        _attack_sig = re.findall(r"热浪|风墙|水刀|应力|裂纹|塌|掀翻|冲击|注入|干扰|推演|代价|对抗", text)
-        if _attack_sig and not _battle_sig:
-            issues.append("B12 战斗机动性警告：有攻防动作但无动态机动信号（追击/闪避/借气流/移位）——战斗=移动中完成，禁止站桩对轰，建议补机动维度")
+    _attack_sig = re.findall(r"热浪|风墙|水刀|应力|裂纹|塌|掀翻|冲击|注入|干扰|推演|代价|对抗|攻击|反击|轰|砸|撞", text)
+    _battle_sig = re.findall(r"追击|缠斗|脱战|闪避|俯冲|爬升|滑翔|借风|借气流|热气流|急流|绕到|侧翼|拉开距离|突进|后退|移位|腾空|落地|翻滚|奔跑|冲向|撤离|包抄", text)
+    if _attack_sig and not _battle_sig:
+        issues.append("B12 战斗机动性警告：有攻防动作但无动态机动信号（追击/闪避/借气流/移位）——战斗=移动中完成，禁止站桩对轰，建议补机动维度")
 
-    # B11 尺度震撼检查（软查点名，不熔断）：宏大/灾难/决战锚（25/26/27/34/35/36/37/38）
+    # B11 尺度震撼检查（语义化，不依赖特定锚号）：正文出现宏大量级但无画面轨换算=点名
     # 要求：宏大量级必须给"画面轨换算"（步行/小时/类比/当量/对比）或"宏观感官锚点"（尺寸+声音/温度/光）
     # 防"三百公里长墙"只给概念不给体感（好看五杠杆·画面缺失=点名）
-    _scale_anchors = {25, 26, 27, 34, 35, 36, 37, 38}
-    if anchor_no in _scale_anchors:
-        _scale_conv = re.findall(r"步行|徒步|走.{0,6}(天|小时|分钟|年)|电梯|坐.{0,4}(小时|分钟)|像.{0,4}(山|海|城|墙)|\d+(?:\.\d+)?(?:亿吨|万吨|公里|千米|米高|米长|米深)|三峡|珠峰|原子弹|航母|当量|功率|度", text)
-        _scale_sense = re.findall(r"嗡|轰鸣|震颤|震动|阴影|光晕|热浪|低温|寒风|风压|气压|臭氧|金属|锈|雷鸣|轰", text)
-        _macro = re.findall(r"公里|千米|万吨|亿吨|千米高|公里长|米高|塔|墙|城|风暴|裂谷|海啸|大陆|垂直|贯穿|遮天", text)
-        if not _scale_conv and not _scale_sense:
-            issues.append("B11 尺度震撼警告：本锚含宏大/灾难/决战场景，但正文无尺度换算（步行/电梯/类比/当量）也无宏观感官锚点（尺寸+声音/温度/光）——只有概念没画面=点名")
-        elif _macro and not _scale_conv:
-            issues.append("B11 尺度震撼警告：出现宏大量级（" + "、".join(list(dict.fromkeys(_macro))[:3]) + "）但无画面轨换算——建议补人类经验锚点（步行多久/像什么/当量多少），只给抽象数字=点名")
+    _scale_conv = re.findall(r"步行|徒步|走.{0,6}(天|小时|分钟|年)|电梯|坐.{0,4}(小时|分钟)|像.{0,4}(山|海|城|墙)|\d+(?:\.\d+)?(?:亿吨|万吨|公里|千米|米高|米长|米深)|三峡|珠峰|原子弹|航母|当量|功率|度", text)
+    _scale_sense = re.findall(r"嗡|轰鸣|震颤|震动|阴影|光晕|热浪|低温|寒风|风压|气压|臭氧|金属|锈|雷鸣|轰", text)
+    _macro = re.findall(r"公里|千米|万吨|亿吨|千米高|公里长|米高|塔|墙|城|风暴|裂谷|海啸|大陆|垂直|贯穿|遮天", text)
+    if _macro and not _scale_conv and not _scale_sense:
+        issues.append("B11 尺度震撼警告：出现宏大量级（" + "、".join(list(dict.fromkeys(_macro))[:3]) + "）但无画面轨换算——建议补人类经验锚点（步行多久/像什么/当量多少），只给抽象数字=点名")
 
     # B10 物理自洽熔断（防编程奇幻：无物理定律支撑的超现实创意=废稿，硬核是底线）
     # 视角分级（v2，比喻修辞合法——角色台词/内心里的编程比喻=特色放行；

@@ -17,6 +17,7 @@
 | `faction.md` | 势力/派系设定（可选） | 作者 |
 | `foreshadow.md` | 伏笔窗口提示 | 作者 |
 | `anchors.json` | 阶段锚点（阶段名/章区间/评分维度） | 程序生成 |
+| `chapter_events.md` | **逐章锚点表**（每章主线锚点关键词；AI 建书自动生成，可手改） | AI / 作者 |
 | `timeline.json` | 人物时间线 | 程序生成 |
 | `scores.json` | 评审六维评分 | 程序生成 |
 | `redlines.json` | 禁词/红线词/术语律（程序自动熔断用） | 程序生成 |

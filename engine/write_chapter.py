@@ -283,7 +283,11 @@ def prev_context():
 
 
 def anchor_guide(ch_no):
-    """按章号返回本章应推进的主线锚点提示（防"原地打转"：每章必须落地锚点的至少一步）"""
+    """按章号返回本章应推进的主线锚点提示（防"原地打转"：每章必须落地锚点的至少一步）
+    优先级：① ANCHOR_KEYWORDS[ch_no] 逐章关键词（AI 建书 chapter_events.md 生成）→ ② 阶段级提示"""
+    kws = m.ANCHOR_KEYWORDS.get(int(ch_no)) or m.ANCHOR_KEYWORDS.get(str(ch_no))
+    if kws:
+        return f"本章锚点关键词：{'、'.join(kws)}。本章必须围绕这些关键词推进（至少落地 2 个），禁止跑题/原地打转。"
     try:
         stage, a_lo, a_hi = m.stage_of_chapter(ch_no)
         dims = m.STAGE_DIMS.get(stage, {})
@@ -327,6 +331,9 @@ def build_prompt(ch_no):
         m.build_stage_guide(ch_no),                        # ⑩ 当前评分标准
         ledger_cards(),                                    # ⑪ 当前状态（正史卡）
     ]
+    ending = m.build_ending_card(ch_no)                    # ⑪·四 结局收束卡（最后 1/4 章才注入）
+    if ending:
+        parts.append(ending)
     fac = faction_card(ch_no)                              # ⑪·五 势力/派系设定（前期不注入）
     if fac:
         parts.append(fac)
@@ -615,7 +622,7 @@ async def polish_chapter(ch_no, draft, key, model_id):
 
 
 async def write_one_chapter(ch_no, args, key, model_id):
-    """写一章，返回状态：ok=落盘 / fused=熔断待修 / retry=重写 / skipped=跳过 / failed=生成失败 / preview"""
+    """写一章，返回状态：ok=落盘 / fused=未过审待修 / retry=重写 / skipped=跳过 / failed=生成失败 / preview"""
     prompt = build_prompt(ch_no)
     print(f"\n{'='*64}\n第{ch_no}章 ｜ 模型={model_id} ｜ prompt {len(prompt)}字符\n{'='*64}")
     if args.preview:

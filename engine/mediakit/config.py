@@ -104,7 +104,41 @@ def _intify_keys(d):
     return {k: _intify_keys(v) for k, v in d.items()}
 
 ANCHOR_KEYWORDS = _intify_keys(ANCHOR_KEYWORDS)
-STAGE_ANCHORS = [tuple(r) for r in _anchors.get("STAGE_ANCHORS", [])]  # JSON 存 list，还原 tuple 与原格式一致
+STAGE_ANCHORS = [tuple(r) for r in _anchors.get("STAGE_ANCHORS", [])]
+# ---- 逐章锚点关键词补充来源：chapter_events.md ----
+# 若 anchors.json 里没有逐章关键词（AI 建书/手工填可生成 chapter_events.md），
+# 从该文件解析「第N章|关键词、关键词|事件一句话」格式回填，让【本章主线锚点】真正逐章生效。
+if not ANCHOR_KEYWORDS:
+    _events_txt = _read_text("chapter_events.md")
+    if _events_txt.strip():
+        _parsed_kw = {}
+        for _line in _events_txt.splitlines():
+            _line = _line.strip()
+            if not _line or _line.startswith(("#", "-", "*", "第", "章")):
+                if not re.match(r"^第\s*\d+\s*章\s*[|｜]", _line):
+                    continue
+            _mm = re.match(r"^第\s*(\d+)\s*章\s*[|｜]\s*([^|｜]+)", _line)
+            if _mm:
+                _kw = [w.strip() for w in re.split(r"[、,，/；;]", _mm.group(2)) if w.strip()]
+                if _kw:
+                    _parsed_kw[int(_mm.group(1))] = _kw
+        if _parsed_kw:
+            ANCHOR_KEYWORDS = _parsed_kw
+  # JSON 存 list，还原 tuple 与原格式一致
+
+# 通用时间锚点正则：优先匹配书内阶段名「X期第N天」，再兜底通用「第N天」（新书不依赖专属阶段名）
+_STAGE_TIME_NAMES = "|".join(re.escape(r[0]) for r in STAGE_ANCHORS if r[0] not in ("全篇",))
+TIME_ANCHOR_RE = re.compile(
+    rf"({_STAGE_TIME_NAMES})第\s*[0-9一二两三四五六七八九十百千]+\s*(天|周|月|年)|"
+    rf"第\s*[0-9一二两三四五六七八九十百千]+\s*(天|日|周|月|年)\b"
+)
+# 宽松版：新书/重写版常用自然时间表达（凌晨四点/次日/暮色…），只认「第N天」会大面积误杀。
+TIME_ANCHOR_RE_LOOSE = re.compile(
+    rf"({_STAGE_TIME_NAMES})第\s*[0-9一二两三四五六七八九十百千]+\s*(天|周|月|年)|"
+    rf"第\s*[0-9一二两三四五六七八九十百千]+\s*(天|日|周|月|年)\b|"
+    rf"凌晨|清晨|早晨|早上|上午|中午|正午|午后|下午|傍晚|黄昏|入夜|夜里|深夜|午夜|半夜|"
+    rf"次日|第二天|翌日|数日后|几天后|晨光|曙光|暮色|夜色|月光|日光|阳光|天亮|天黑|夜深"
+)
 STAGE_DIMS = _anchors.get("STAGE_DIMS", {})
 LATE_STAGE_BLACKLIST = _anchors.get("LATE_STAGE_BLACKLIST", {})
 

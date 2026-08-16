@@ -158,6 +158,35 @@ def stage_of_chapter(chapter_no):
         return STAGE_ANCHORS[-1][0], STAGE_ANCHORS[-1][1], STAGE_ANCHORS[-1][2]
     return "全篇", 1, 999
 
+def build_ending_card(chapter_no):
+    """结局收束卡：进度进入全书最后 1/4 时注入，要求收束伏笔/主线、逼近结局方向。
+
+    通用化：从 outline.md 提取「结局方向」段；无结局方向时给通用收束指令。
+    """
+    import re as _re
+    # 全书总章数：取 STAGE_ANCHORS 里最大的 ch_hi（元组结构：name, a_lo, a_hi, ch_lo, ch_hi）
+    total = max((r[4] for r in STAGE_ANCHORS), default=999)
+    if chapter_no < total - total // 4:
+        return ""                                    # 前 3/4 不注入（防提前剧透结局）
+    outline = STORY_OUTLINE
+    ending = ""
+    for _key in ("结局方向", "结尾钩子方向", "结局"):
+        _i = outline.find(_key)
+        if _i != -1:
+            _seg = outline[_i:_i + 300]
+            _j = _seg.find("\n\n")
+            ending = _seg if _j == -1 else _seg[:_j]
+            break
+    lines = [f"【结局收束·硬】（当前第{chapter_no}章，全书约{total}章，已进入最后{total - chapter_no + 1}章）",
+             "必须开始收束：所有主线/伏笔/人物弧光要在此阶段逐步落地，禁止开新支线、禁止引入新核心设定、禁止无限延展。"]
+    if ending.strip():
+        lines.append(f"【结局方向（来自大纲，必须朝它推进）】{ending.strip()}")
+    else:
+        lines.append("【结局方向】按大纲的结局构思推进；若大纲未定，本章起逐步让主线走向一个明确的收束点（不强行圆满，但必须收口）。")
+    lines.append("每章结尾都要比上一章更接近结局，最后 1 章必须完成全书收尾（不是悬而未决的续写钩子）。")
+    return "\n".join(lines)
+
+
 def build_stage_guide(chapter_no):
     """生成【本阶段评分标准】注入文本（评审打分用，六维维度固定、要点随阶段变）"""
     name, a_lo, a_hi = stage_of_chapter(chapter_no)

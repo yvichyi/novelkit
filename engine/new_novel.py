@@ -31,8 +31,6 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 TEMPLATE_DIR = BASE / "templates" / "novel_config"
-if not TEMPLATE_DIR.exists():
-    TEMPLATE_DIR = BASE.parent / "templates" / "novel_config"  # NovelKit 仓库布局：模板在仓库根
 BOOKS_DIR = BASE / "books"
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -95,14 +93,14 @@ def load_key(arg_key: str) -> str:
 def ask_stage_plan(total_chapters: int):
     """阶段规划交互：返回 [(阶段名, 章起, 章止, 一句话)]"""
     print(f"\n{C_B}📚 阶段规划（每个阶段 = 小说的一个「部」，写章时按阶段注入评分标准与锚点）{C_0}")
-    print("   默认 3 阶段：①开端(1~10章) ②发展(11~25章) ③结局(26~{}章)".format(total_chapters))
+    print("   默认 3 阶段：①开端(1~10章) ②发展(11~25章) ③终局(26~{}章)".format(total_chapters))
     custom = ask("   要自定义吗？[回车=用默认 / 输入阶段数]", "").strip()
     n = int(custom) if custom.isdigit() and int(custom) > 0 else 3
 
     stages = []
     if n == 3 and not custom:
         defaults = [(1, 10), (11, min(25, total_chapters)), (min(26, total_chapters + 1), total_chapters)]
-        names = ["开端", "发展", "结局"]
+        names = ["开端", "发展", "终局"]
     else:
         # 每个阶段的起止章都手填（傻瓜式：显示可用区间，回车=自动续排）
         defaults = []
@@ -155,12 +153,22 @@ def gen_config_files(book_dir: Path, name: str, protagonist: str, stages: list):
         anchors["STAGE_DIMS"][st["name"]] = dims
     (nc / "anchors.json").write_text(json.dumps(anchors, ensure_ascii=False, indent=1), encoding="utf-8")
 
+    # ---- chapter_events.md：逐章锚点（AI 建书生成；手工建书给占位模板）----
+    # 格式：每行「第N章|关键词1、关键词2|本章必须推进的事件一句话」
+    # 引擎在 anchors.json 的 ANCHOR_KEYWORDS 为空时解析此文件回填逐章锚点（写章 prompt 的【主线锚点】用）
+    (nc / "chapter_events.md").write_text(
+        f"《{name}》逐章锚点表（写章 prompt 的【本章主线锚点】来源）\n"
+        "格式：第N章|关键词（2~4个，顿号分隔）|本章必须推进的事件一句话\n"
+        "========\n"
+        f"{chr(10).join(f'第{c}章| |' for c in range(1, (stages[-1]['ch_hi'] if stages else 30) + 1))}\n",
+        encoding="utf-8")
+
     # ---- timeline.json：人物时间线（主角自始至终可用）----
     timeline = {"CHARACTER_TIMELINE": [[1, stages[0]["name"] if stages else "全篇",
                                         [protagonist] if protagonist else ["主角"], [], []]]}
     (nc / "timeline.json").write_text(json.dumps(timeline, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    # ---- scores.json：六维评分维度（AI 评审用）----
+    # ---- scores.json：六维评分维度（评审用）----
     scores = {"SCORE_DIMS": ["人物与声音", "情节推进", "世界设定", "文本质感", "冲突张力", "一致性"]}
     (nc / "scores.json").write_text(json.dumps(scores, ensure_ascii=False, indent=1), encoding="utf-8")
 
@@ -217,8 +225,8 @@ async def ai_generate_files(book_dir: Path, name: str, intro: str, protagonist: 
         return LLMClient("新书设定", "qwen", "\033[95m", base_url, key,
                          "deepseek-v4-flash", QWEN_PERSONA, max_history=0)
 
-    async def gen(filename, instruction, max_tokens=6000):
-        prompt = base_ctx + "\n" + instruction
+    async def gen(filename, instruction, max_tokens=6000, ctx=None):
+        prompt = (ctx or base_ctx) + "\n" + instruction
         try:
             client = mk_client()
             reply = await client.chat(prompt, temperature=0.8, max_tokens=max_tokens)
@@ -229,28 +237,59 @@ async def ai_generate_files(book_dir: Path, name: str, intro: str, protagonist: 
             print(f"{C_Y}  ⚠️ {filename} 生成失败（保留模板）：{str(e)[:100]}{C_0}")
             return False
 
+    # 两阶段建书：先 world_setting 打底（世界观底座），其余文件基于它生成，杜绝并行各写各的世界观分裂。
+    # （《限制》踩坑：并行生成时 world_setting=壳/文明止损，outline=旷在/形态坍缩，prompt 自相矛盾 → 正文跑偏）
+    ws_ok = await gen(
+        "world_setting.md",
+        "【任务：世界观精简版】为这部小说写核心世界观精简版（400~900字）："
+        "一句话简介 + 3~8 条核心设定（每条一句话、信息密度高）。"
+        "这是全书的**世界观底座**，之后所有设定文件（脑洞/红线/大纲/清单/逐章锚点）都会以它为准，"
+        "所以必须把故事的核心冲突/机制/独特之处写清楚。直接输出 markdown 正文，不要任何说明、不要文件标题注释。",
+    )
+    ws_text = ""
+    _ws_file = book_dir / "novel_config" / "world_setting.md"
+    if _ws_file.exists():
+        ws_text = _ws_file.read_text(encoding="utf-8").strip()
+    ws_ctx = base_ctx + ("\n【已定世界观底座（所有设定必须与此一致，禁止另起一套）】\n" + ws_text if ws_text else "")
+
     tasks = [
         gen("topic.md",
             "【任务：世界观全文】输出《" + name + "》的完整世界观设定（2000~4000字）：世界运行的底层规则、"
             "核心设定与机制、力量体系（若有）、社会/文明结构、历史背景、本作独特之处。"
-            "直接输出 markdown 正文，不要任何说明、不要文件标题注释。"),
-        gen("world_setting.md",
-            "【任务：世界观精简版】为这部小说写核心世界观精简版（400~900字）："
-            "一句话简介 + 3~8 条核心设定（每条一句话、信息密度高）。"
-            "直接输出 markdown 正文，不要任何说明、不要文件标题注释。"),
+            "**必须严格沿用上面【已定世界观底座】的核心设定，只展开细节，禁止另起一套世界观。**"
+            "直接输出 markdown 正文，不要任何说明、不要文件标题注释。",
+            ctx=ws_ctx),
         gen("world_idea.md",
             "【任务：脑洞库】为这部小说构思 12~20 个「哇点」创意（每个 1~3 句）：本作设定下"
             "可以发生的最有趣/最震撼/最反直觉的场景或玩法。要求可套进剧情（谁做的/怎么做的/为什么讲得通/代价是什么），"
-            "禁止空泛。直接输出 markdown 列表，不要任何说明。"),
+            "**必须基于上面【已定世界观底座】的机制衍生，禁止发明底座没有的新设定。**"
+            "直接输出 markdown 列表，不要任何说明。",
+            ctx=ws_ctx),
         gen("redline_table.md",
             "【任务：红线对照表】为这部小说写写作红线（300~800字）：三问判据（尺度对不对/踩没踩红线/付不付得起代价）"
-            "+ 5~10 条具体红线与反面教材（哪些写法会破坏设定/爽感/逻辑）。直接输出 markdown 正文，不要任何说明。"),
+            "+ 5~10 条具体红线与反面教材（哪些写法会破坏设定/爽感/逻辑）。"
+            "**必须围绕上面【已定世界观底座】的核心设定写红线。**直接输出 markdown 正文，不要任何说明。",
+            ctx=ws_ctx),
         gen("outline.md",
             "【任务：故事大纲】按阶段规划写分层大纲：全局骨架（主题/主角弧光/结局方向/写作总纲）+ 每阶段一段"
-            "（本阶段要推进什么、关键事件、主角成长、结尾钩子方向）。直接输出 markdown 正文，不要任何说明。"),
+            "（本阶段要推进什么、关键事件、主角成长、结尾钩子方向）。"
+            "**必须严格基于上面【已定世界观底座】，禁止另起一套；结局方向必须来自底座的核心冲突。**"
+            "直接输出 markdown 正文，不要任何说明。",
+            ctx=ws_ctx),
         gen("checklist.md",
             "【任务：设定一致性清单】把这部小说的关键设定写成「- 【硬】…」「- 【必】…」「- 【伏笔】…」格式的清单"
-            "（30~60条），供连载中核对一致性。直接输出 markdown 列表，不要任何说明。"),
+            "（30~60条），供连载中核对一致性。**必须全部来自上面【已定世界观底座】，禁止凭空发明。**"
+            "直接输出 markdown 列表，不要任何说明。",
+            ctx=ws_ctx),
+        gen("chapter_events.md",
+            "【任务：逐章锚点表】基于阶段规划和上面【已定世界观底座】，为每一章写「本章必须推进的事件 + 2~4 个关键词」——"
+            "这是连载时每章 prompt 的【主线锚点】，作用是防止 AI 写跑题/原地打转/偏离大纲。"
+            "要求：每章的事件必须服务于本阶段目标并逐步逼近结局；后期章节（最后1/4）开始收束伏笔、走向结局方向；"
+            "相邻章节事件要有递进，禁止重复。\n"
+            "严格按此格式输出（每章一行，用 | 分隔三列）：\n"
+            "第1章|关键词1、关键词2、关键词3|本章必须推进的事件一句话\n"
+            "…一直输出到第{total}章。只输出表格行，不要任何说明、不要标题。".replace("{total}", str(stages[-1]["ch_hi"] if stages else 30)),
+            ctx=ws_ctx),
     ]
     results = await asyncio.gather(*tasks)
     return sum(1 for r in results if r)
