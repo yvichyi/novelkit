@@ -1,0 +1,35 @@
+# ===== 敏感信息（绝不可提交）=====
+.env
+*.env
+*.key
+*key*.json
+blindtest_key.json
+
+# ===== 《介质》专属数据（本仓库只保留引擎与示例）=====
+novel_config/
+sample_library/
+few_shot_samples.md
+few_shot_continuation.md
+脑洞库.md
+红线对照表.md
+01_正史账本/
+已发布正文/
+已发布正文_熔断待修/
+
+# ===== 运行时数据（每本书自己生成，不该进版本库）=====
+books/*/ledger/
+books/*/已发布正文/
+books/*/README.md
+!books/测试之书/README.md
+
+# ===== 测试 / 日志 / 报告 / 备份 =====
+*.log
+run_*.log
+test_*/
+实验_*/
+验证_*/
+*.bak
+*.bak2
+*.html
+__pycache__/
+*.pyc
