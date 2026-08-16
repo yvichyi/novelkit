@@ -370,7 +370,7 @@ def score_quality(text, check_apocalypse=True):
     wo = len(re.findall(r"(?<![自本忘无你我])我", nar))
     checks["人称"] = "FAIL" if wo > 3 else ("WARNING" if wo > 0 else "PASS")
     # 元话语（创作过程字眼）
-    meta = re.findall(r"老K|清单第|评审|写作思路|创作说明|修改如下|待续|本章完|（示例|例如", text)
+    meta = re.findall(r"评审|清单第|评审|写作思路|创作说明|修改如下|待续|本章完|（示例|例如", text)
     checks["元话语"] = "FAIL" if meta else "PASS"
     # 环境有人（每章至少一处「人的痕迹」；仅特定题材检查）
     if check_apocalypse:
@@ -463,7 +463,7 @@ async def review_chapter(ch_no, text, key):
         prompt = (
             f"这是刚写好的第{ch_no}章（{stage}时代）：\n\n{text}\n\n"
             + f"【本阶段评分标准（评审按此六维）】\n{m.build_stage_guide(ch_no)}\n\n"
-            + "你作为主编「老K」评审这章。只输出固定格式（缺一不可）：\n"
+            + "你作为主编评审这章。只输出固定格式（缺一不可）：\n"
             + "【本章亮点】1~2条，每条30字内\n"
             + "【下章改进清单】3~5条，每条一句话、具体可执行（针对下一章的改进，不是总结本章），"
             + "每条以'- '开头，示例：'- 对话偏平，下章用动作+潜台词替代直白问答'\n"

@@ -17,7 +17,7 @@ NOVEL_DIR=books/我的小说 python3 write_chapter.py --write 1
 ```
 
 ### 🧠 评审闭环（越写越好，不是越写越崩）
-每章写完，AI 主编「老K」自动评审：
+每章写完，AI 主编自动评审：
 - **【下章改进清单】** → 注入下一章 prompt，让连载逐章优化
 - **【事件】** → 自动登记进正史账本（章节事件表）
 - **【伏笔】** → 自动登记伏笔账本（级别 + 预计回收阶段）
@@ -66,18 +66,6 @@ python3 web_writer.py
 
 ---
 
-## 📚 自带示例书
-
-`books/测试之书/` 是一本**完整走完全链路**的示例（AI 生成设定 + AI 写了第 1 章 + 老K 评审 + 伏笔登记），打开就能看效果：
-
-```bash
-NOVEL_DIR=books/测试之书 python3 write_chapter.py --preview   # 看第1章 prompt（17K 字符，设定/大纲/脑洞全注入）
-cat "books/测试之书/已发布正文/第1章.md"                        # 读 AI 写的第1章《雨中电梯》（3527字）
-cat "books/测试之书/ledger/评审反馈/第1章.md"                  # 看老K 的评审与伏笔登记
-```
-
-> 示例书内容由 AI 生成，仅作演示。**运行需要你自己的 API Key**，本仓库不含任何 key。
-
 ---
 
 ## 🧱 一本书的配置结构
@@ -86,7 +74,7 @@ cat "books/测试之书/ledger/评审反馈/第1章.md"                  # 看�
 books/我的小说/
 ├── novel_config/          ← 书专属设定（引擎从这里读，改这里=改设定）
 │   ├── persona_qwen.md    ← 写作模型人格
-│   ├── persona_kimi.md    ← 评审模型人格（老K）
+│   ├── persona_kimi.md    ← 评审模型人格
 │   ├── topic.md           ← 完整世界观
 │   ├── world_setting.md   ← 世界观精简版（注入每章 prompt 最前）
 │   ├── world_idea.md      ← 脑洞库（每章「哇点」原料）
@@ -101,12 +89,12 @@ books/我的小说/
 ├── ledger/                ← 运行时账本（自动生成）
 │   ├── 章节事件表.md      ← 每章不可逆事件（前文摘要层的数据源）
 │   ├── 伏笔账本.md        ← 伏笔埋设/回收
-│   ├── 评审反馈/          ← 老K 每章评审
+│   ├── 评审反馈/          ← AI 每章评审
 │   └── usage.jsonl        ← 每次调用的 token 与费用
 └── 已发布正文/            ← 写好的章节（正史）
 ```
 
-想自定义？复制 `templates/novel_config/` 到你的书目录，照着 `books/测试之书/novel_config/` 填即可。
+想自定义？复制 `templates/novel_config/` 到你的书目录，用 `new_novel.py` 问答建书即可。
 
 ---
 

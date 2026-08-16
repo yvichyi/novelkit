@@ -40,7 +40,7 @@ def parse_summary_package(text):
     return summary, checklist
 
 def extract_checklist_delta(review):
-    """从老K评审中提取【清单更新】/## 清单更新 区块（新增/修正的设定条目）"""
+    """从评审中提取【清单更新】/## 清单更新 区块（新增/修正的设定条目）"""
     m = re.search(r"(?:【清单更新】|#{1,4}\s*清单更新)\s*(.*?)(?:\n\n|\Z)", review or "", re.S)
     if not m:
         return ""
@@ -50,7 +50,7 @@ def extract_checklist_delta(review):
     return delta
 
 def parse_discuss_signal(review):
-    """从老K评审中提取【讨论建议】/## 讨论建议 区块：下一章是否需要讨论。
+    """从评审中提取【讨论建议】/## 讨论建议 区块：下一章是否需要讨论。
     兼容多种输出风格：『需要讨论』『直接写』『- 需要讨论：…』『直接写：…』"""
     m = re.search(r"(?:【讨论建议】|#{1,4}\s*讨论建议)\s*[-—:：]?\s*(需要讨论|直接写)", review or "")
     if not m:
@@ -58,7 +58,7 @@ def parse_discuss_signal(review):
     return m.group(1) == "需要讨论"
 
 def extract_consensus(verdict):
-    """从老K共识审核中提取【共识达成】区块（本章定稿计划）"""
+    """从评审共识审核中提取【共识达成】区块（本章定稿计划）"""
     m = re.search(r"【共识达成】\s*(.*?)(?:\n\n|\Z)", verdict or "", re.S)
     if not m:
         return ""
@@ -73,7 +73,7 @@ def append_discussion(outdir, round_no, text):
         log(f"⚠ 讨论记录写入失败：{e}", C_WARN)
 
 def merge_checklist(current, delta):
-    """把老K的清单更新合并进主清单：逐条去重、保留顺序"""
+    """把评审的清单更新合并进主清单：逐条去重、保留顺序"""
     current = (current or "").strip()
     delta = (delta or "").strip()
     if not delta:

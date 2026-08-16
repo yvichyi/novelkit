@@ -5,7 +5,7 @@
 *key*.json
 blindtest_key.json
 
-# ===== 《介质》专属数据（本仓库只保留引擎与示例）=====
+# ===== 默认书专属数据（本仓库只保留引擎与模板）=====
 novel_config/
 sample_library/
 few_shot_samples.md

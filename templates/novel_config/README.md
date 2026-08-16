@@ -13,7 +13,7 @@
 | `outline.md` | 分层大纲（全局骨架 + 每阶段推进方向） | 作者 / AI |
 | `checklist.md` | 设定一致性清单（连载中核对，防吃书） | 作者 / AI |
 | `persona_qwen.md` | 正史作家（执笔人）人格 | 作者 |
-| `persona_kimi.md` | 章评审（老K）人格 | 作者 |
+| `persona_kimi.md` | 章评审（评审）人格 | 作者 |
 | `faction.md` | 势力/派系设定（可选） | 作者 |
 | `foreshadow.md` | 伏笔窗口提示 | 作者 |
 | `anchors.json` | 阶段锚点（阶段名/章区间/评分维度） | 程序生成 |

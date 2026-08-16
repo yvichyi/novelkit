@@ -136,7 +136,7 @@ def build_setting_card(chapter_no, outline):
     body = " ".join(keep)
     MAX_CARD = 40000  # 正文质量优先：设定速查卡允许较大（用户确认可翻几倍），上限防无限膨胀
     if len(body) > MAX_CARD:
-        body = body[:MAX_CARD] + "…（设定速查卡截断，其余以老K评审的完整设定为准）"
+        body = body[:MAX_CARD] + "…（设定速查卡截断，其余以评审的完整设定为准）"
     discipline = (
         "【设定一致性红线（硬，任何阶段必守）】严格遵循本书 novel_config/ 中的核心设定与红线表；"
         "禁止凭空自编无内在逻辑的设定/能力；任何新能力须有机制与代价（谁做的/怎么做的/为什么讲得通/代价是什么）。\n"
@@ -159,7 +159,7 @@ def stage_of_chapter(chapter_no):
     return "全篇", 1, 999
 
 def build_stage_guide(chapter_no):
-    """生成【本阶段评分标准】注入文本（老K打分用，六维维度固定、要点随阶段变）"""
+    """生成【本阶段评分标准】注入文本（评审打分用，六维维度固定、要点随阶段变）"""
     name, a_lo, a_hi = stage_of_chapter(chapter_no)
     dims = STAGE_DIMS.get(name)
     if not dims:
@@ -350,7 +350,7 @@ def extract_hard_rules(checklist, limit=15):
     return "\n".join("- " + x for x in out)
 
 def extract_event(review):
-    """从老K评审提取【事件】区块（一句话本章发生了什么，供前情卡引用）"""
+    """从评审提取【事件】区块（一句话本章发生了什么，供前情卡引用）"""
     if not review:
         return ""
     m = re.search(r"(?:【事件】|#{1,4}\s*事件)\s*(.+)", review)
@@ -359,12 +359,12 @@ def extract_event(review):
     return ""
 
 def append_event(outdir, chapter_no, event_text):
-    """把老K登记的【事件】追加到 前情事件.md（代码累积，供前情卡引用，零幻觉）"""
+    """把评审登记的【事件】追加到 前情事件.md（代码累积，供前情卡引用，零幻觉）"""
     try:
         p = outdir / "前情事件.md"
         line = f"- 第{chapter_no}章：{event_text}"
         if not p.exists():
-            p.write_text("# 前情事件表（老K每章登记，前情卡引用）\n\n" + line + "\n", encoding="utf-8")
+            p.write_text("# 前情事件表（评审每章登记，前情卡引用）\n\n" + line + "\n", encoding="utf-8")
         else:
             with open(str(p), "a", encoding="utf-8") as f:
                 f.write(line + "\n")
@@ -390,13 +390,13 @@ def build_memory_doc(outdir, checklist):
             parts.append("【章节时间线】" + " → ".join(chapters[-15:]))
     except Exception:
         pass
-    # 2) 近期事件（老K【事件】区块登记，最近10条）
+    # 2) 近期事件（评审【事件】区块登记，最近10条）
     try:
         ep = outdir / "前情事件.md"
         if ep.exists():
             evs = [l.strip() for l in ep.read_text(encoding="utf-8").splitlines() if l.strip().startswith("- 第")]
             if evs:
-                parts.append("【近期事件（老K登记）】\n" + "\n".join(evs[-10:]))
+                parts.append("【近期事件（评审登记）】\n" + "\n".join(evs[-10:]))
     except Exception:
         pass
     # 3) 未回收伏笔（前6条）
@@ -433,7 +433,7 @@ def prune_checklist(outdir, checklist, keep_status=2):
     return "\n".join(new_lines).strip(), "\n".join(archive).strip()
 
 def extract_scores(text):
-    """C2：解析老K【评分】区块：六维各1~5分。返回 dict 或 None（<3维有效视为无效）"""
+    """C2：解析评审【评分】区块：六维各1~5分。返回 dict 或 None（<3维有效视为无效）"""
     if not text:
         return None
     m = re.search(r"(?:【评分】|#{1,4}\s*评分)([\s\S]*?)(?=\n(?:【|#{1,4}\s*[^#\n]*:?|\Z)|$)", text, re.S)
