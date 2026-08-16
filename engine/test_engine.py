@@ -127,6 +127,37 @@ def t7_gate():
     check("通用文本无熔断", len(fatal) == 0, f"{fatal}")
 
 
+def t8_foreshadow():
+    print("\n[8] 伏笔分级管控（解析/锚绑定/注入）")
+    from mediakit import foreshadow as fh
+    fake_ledger = (
+        "# 伏笔账本\n\n"
+        "| ID | 内容 | 埋设章 | 计划回收 | 状态 | 关联 |\n"
+        "|:---|:---|:---|:---|:---|:---|\n"
+        "| V-01 | 会算的陌生人 | 第1章 | 中期 | 已埋 | 主线威胁 |\n"
+        "| V-02 | 铁锈红天空 | 第1章 | 后期 | 已回收 | 大气被改 |\n\n"
+        "## 第5章 伏笔登记\n"
+        "- 营地纸片「走」｜级别A｜主线｜短中期\n"
+        "- 哨音人（级别B·预计短中期回收）\n\n"
+        "## 支线池（暂不回收，回收时转主表）\n"
+        "- 收音机杂音｜级别C｜支线｜3章内\n"
+    )
+    parsed = fh.parse_ledger(fake_ledger)
+    main_names = [x["content"] for x in parsed["main"]]
+    check("解析：主线2条（表格+登记）", "会算的陌生人" in main_names and "营地纸片「走」" in main_names, f"{main_names}")
+    check("解析：旧格式登记也识别", "哨音人" in main_names, f"{main_names}")
+    check("解析：支线入池", any("收音机杂音" in x["content"] for x in parsed["side"]), f"{parsed['side']}")
+    check("解析：已回收识别", any("V-02" in x["content"] for x in parsed["recovered"]))
+    outline = ("◆ 锚3 成长（第5~15章）：xxx\n- 回收伏笔：V-01\n\n"
+               "◆ 锚4 冲击（第10~20章）：xxx\n- 回收伏笔：V-01, 营地纸片「走」\n")
+    rec_map = dict(fh.current_anchor_recovery(outline, 12))
+    check("锚绑定：第12章命中锚3+锚4", rec_map.get("V-01") == (3, 4) and rec_map.get("营地纸片「走」") == (4,), f"{rec_map}")
+    card = fh.build_foreshadow_card(fake_ledger, fh.current_anchor_recovery(outline, 12))
+    check("注入：含应收网", "应收网" in card and "会算的陌生人" in card and "必须回收" in card)
+    check("注入：含主线TOP", "未回收主线伏笔" in card)
+    check("注入：支线只给统计", "1 条支线伏笔未回收" in card, f"{card[-120:]}")
+
+
 def main():
     print("=" * 56)
     print("  novelkit-engine golden test (通用版)")
@@ -138,6 +169,7 @@ def main():
     t5_anchor_parse()
     t6_epub_volume()
     t7_gate()
+    t8_foreshadow()
     print("\n" + "=" * 56)
     print(f"  结果：{PASS} 通过 / {FAIL} 失败")
     print("=" * 56)

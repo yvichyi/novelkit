@@ -219,13 +219,43 @@ def world_prefix():
 
 
 def ledger_cards():
-    """③ 五张正史卡（当前态）"""
+    """③ 四张正史卡（当前态，不含伏笔——伏笔单独走分级注入防支线带跑主线）"""
     parts = []
-    for name in ["正史状态卡", "剧情推演卡", "大纲审查卡", "章节事件表", "伏笔账本"]:
+    for name in ["正史状态卡", "剧情推演卡", "大纲审查卡", "章节事件表"]:
         t = read_text(LEDGER / f"{name}.md").strip()
         if t:
             parts.append(f"【{name}】\n{t}")
     return "\n\n".join(parts)
+
+
+def foreshadow_card(ch_no):
+    """③·五 伏笔卡（分级管控：应收网（大纲锚绑定）> 主线TOP3 > 支线冷冻）
+
+    替代旧版「伏笔账本全量注入」：不再让模型看到所有历史伏笔（含支线/噪音），
+    只看到 ① 当前锚点标注该回收的伏笔（必须回收）② 主线未回收前3条（可铺垫禁展开）
+    ③ 支线只给统计（禁止展开）。大纲无「回收伏笔」字段时自动降级为 主线TOP3。
+    """
+    try:
+        from mediakit import foreshadow as fh
+        vp = LEDGER / "伏笔账本.md"
+        if not vp.exists():
+            return ""
+        ledger_text = vp.read_text(encoding="utf-8").strip()
+        if not ledger_text:
+            return ""
+        # 大纲来源：优先新书 novel_config/outline.md，退回默认大纲常量
+        if NOVEL_DIR:
+            outline_text = read_text(Path(NOVEL_DIR) / "novel_config" / "outline.md") or m.STORY_OUTLINE
+        else:
+            outline_text = read_text(LEDGER / "大纲.md") or m.STORY_OUTLINE
+        rec = fh.current_anchor_recovery(outline_text, ch_no)
+        card = fh.build_foreshadow_card(ledger_text, rec)
+        if not card:
+            # 账本存在但无待回收 → 极简占位防模型自由发挥埋支线
+            return "【伏笔】当前无待回收伏笔；禁止新埋与主线无关的支线伏笔。"
+        return card
+    except Exception as e:
+        return f"【伏笔卡（生成失败，降级提示）】{e}"
 
 
 def faction_card(ch_no):
@@ -352,6 +382,9 @@ def build_prompt(ch_no):
         m.build_stage_guide(ch_no),                        # ⑩ 当前评分标准
         ledger_cards(),                                    # ⑪ 当前状态（正史卡）
     ]
+    fh = foreshadow_card(ch_no)                            # ⑪·二 伏笔卡（分级管控）
+    if fh:
+        parts.append(fh)
     ending = m.build_ending_card(ch_no)                    # ⑪·四 结局收束卡（最后 1/4 章才注入）
     if ending:
         parts.append(ending)
@@ -496,7 +529,11 @@ async def review_chapter(ch_no, text, key):
             + "【下章改进清单】3~5条，每条一句话、具体可执行（针对下一章的改进，不是总结本章），"
             + "每条以'- '开头，示例：'- 对话偏平，下章用动作+潜台词替代直白问答'\n"
             + "【事件】本章不可逆事件或关键推进，一句话20~40字（供登记章节事件表；无重大事件写'无'）\n"
-            + "【伏笔】本章新埋设的伏笔（写：名称｜级别A/B/C｜预计回收阶段），或已回收的伏笔（写：回收｜名称）；无则写'无'\n"
+            + "【伏笔】本章新埋设的伏笔：**每条独立一行**，严格格式「名称｜级别A/B/C｜主线/支线｜预计回收阶段」"
++ "（A=核心必须回收、B=观察、C=噪音不入账；与主线无关的一律标「支线」），或已回收的伏笔（格式「回收｜名称」）；"
++ "无则写'无'。禁止一行塞多条、禁止省略主线/支线标注。\n"
++ "【伏笔核对】检查本章是否回收/推动了 prompt 伏笔卡中标注'必须回收'的应收网伏笔；"
++ "一条都没回收且未解释 → 写进【下章改进清单】。\n"
             + "禁止输出其他内容。"
         )
         reply = await client.chat(prompt, temperature=0.3, max_tokens=m.REVIEW_MAX_TOKENS, thinking=m.REVIEW_THINKING)
@@ -546,34 +583,57 @@ def update_ledger(ch_no, review_text):
         with open(ep, "a", encoding="utf-8") as f:
             f.write(block)
         print(f"📌 已登记章节事件表：第{ch_no}章 - {ev[:40]}")
-    # ---- 伏笔 → 伏笔账本 ----
+    # ---- 伏笔 → 伏笔账本（主线进登记区，支线进支线池，回收进回收记录） ----
     vm = re.search(r"【伏笔】([\s\S]*?)(?=\n【|$)", review_text)
     if vm:
         lines = [ln.strip() for ln in vm.group(1).splitlines() if ln.strip() and ln.strip() != "无"]
         if lines:
             vp = LEDGER / "伏笔账本.md"
             vp_text = vp.read_text(encoding="utf-8") if vp.exists() else ""
-            entries = []
+            new_main, new_side, recovered = [], [], []
             for ln in lines:
                 ln2 = ln[2:].strip() if ln.startswith("-") else ln  # 去掉 AI 可能带的 "- " 前缀
                 if ln2.startswith("回收"):
                     # 回收｜名称
                     nm = ln2.split("｜", 1)[-1].split("|", 1)[-1].strip()
-                    entries.append(f"  - 已回收：{nm}")
+                    recovered.append(f"  - 已回收：{nm}")
+                    continue
+                # 名称｜级别A/B/C｜主线/支线｜预计阶段（兼容旧格式 名称｜级别｜阶段 → 默认主线）
+                parts = re.split(r"[｜|]", ln2)
+                nm = parts[0].strip()
+                rest = [p.strip() for p in parts[1:] if p.strip()]
+                level = next((p for p in rest if p.upper() in ("A", "B", "C")), "")
+                mainline = next((p for p in rest if p in ("主线", "支线")), "主线")
+                plan = "·".join(p for p in rest if p not in (level, mainline))
+                label = "·".join(x for x in (f"级别{level}" if level else "",
+                                             mainline,
+                                             f"预计{plan}回收" if plan and not plan.endswith("回收") else (plan if plan else "")) if x)
+                entry = f"  - {nm}（{label}）" if label else f"  - {nm}"
+                (new_side if mainline == "支线" else new_main).append(entry)
+            # 主线登记区：插在「## 回收记录」前；支线池：独立区块；回收记录：插在末尾区块前
+            if new_main:
+                insert = f"\n## 第{ch_no}章 伏笔登记\n" + "\n".join(new_main) + "\n"
+                anchor = "## 回收记录"
+                if anchor in vp_text:
+                    vp_text = vp_text.replace(anchor, insert + "\n" + anchor, 1)
                 else:
-                    # 名称｜级别｜阶段
-                    parts = re.split(r"[｜|]", ln2)
-                    nm = parts[0].strip()
-                    rest = "·".join(p.strip() for p in parts[1:] if p.strip())
-                    entries.append(f"  - {nm}（{rest}）" if rest else f"  - {nm}")
-            anchor = "## 回收记录"
-            insert = f"\n## 第{ch_no}章 伏笔登记\n" + "\n".join(entries) + "\n"
-            if anchor in vp_text:
-                vp_text = vp_text.replace(anchor, insert + "\n" + anchor, 1)
-            else:
-                vp_text += insert
+                    vp_text += insert
+            if new_side:
+                side_anchor = "## 支线池（暂不回收，回收时转主表）"
+                side_block = "\n" + "\n".join(new_side) + "\n"
+                if side_anchor in vp_text:
+                    vp_text = vp_text.replace(side_anchor, side_anchor + side_block, 1)
+                else:
+                    vp_text += "\n" + side_anchor + "\n" + "\n".join(new_side) + "\n"
+            if recovered:
+                rec_anchor = "## 回收记录"
+                rec_block = "\n".join(recovered) + "\n"
+                if rec_anchor in vp_text:
+                    vp_text = vp_text.replace(rec_anchor, rec_block + "\n" + rec_anchor, 1)
+                else:
+                    vp_text += "\n" + rec_anchor + "\n" + "\n".join(recovered) + "\n"
             vp.write_text(vp_text, encoding="utf-8")
-            print(f"📌 已登记伏笔账本：第{ch_no}章 {len(entries)} 条")
+            print(f"📌 已登记伏笔账本：第{ch_no}章 主线{len(new_main)}/支线{len(new_side)}/回收{len(recovered)} 条")
 
 
 def load_last_review(ch_no):
