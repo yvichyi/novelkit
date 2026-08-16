@@ -31,8 +31,8 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 # 模板目录兼容两种布局：
-#   NovelKit 仓库：引擎在 engine/ 子目录 → 模板在仓库根 templates/novel_config
-#   原版《介质》等：脚本和模板同层 → 模板在 BASE/templates/novel_config
+#   本仓库：引擎在 engine/ 子目录 → 模板在仓库根 templates/novel_config
+#   单目录部署：脚本和模板同层 → 模板在 BASE/templates/novel_config
 TEMPLATE_DIR = BASE.parent / "templates" / "novel_config"
 if not TEMPLATE_DIR.exists():
     TEMPLATE_DIR = BASE / "templates" / "novel_config"
