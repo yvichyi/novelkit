@@ -20,7 +20,6 @@ few_shot_continuation.md
 books/*/ledger/
 books/*/已发布正文/
 books/*/README.md
-!books/测试之书/README.md
 
 # ===== 测试 / 日志 / 报告 / 备份 =====
 *.log
