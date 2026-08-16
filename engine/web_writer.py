@@ -285,7 +285,7 @@ def start_newbook(name, intro, protagonist, total, use_ai, key, stages=None):
             hi = min(lo + ln - 1, total_n)
             if lo > total_n:
                 break
-            stages.append({"name": ["开端", "发展", "终局"][i] if i < 3 else f"阶段{i+1}",
+            stages.append({"name": ["开端", "发展", "结局"][i] if i < 3 else f"阶段{i+1}",
                            "ch_lo": lo, "ch_hi": hi, "desc": ""})
             lo = hi + 1
     def _fn():
@@ -661,7 +661,7 @@ PAGE = r"""<!DOCTYPE html>
     <input id="nbTotal" type="number" min="1" value="30" placeholder="总章数">
   </div>
   <label>阶段规划（每行一个「阶段名:起-止章」，留空=自动3阶段）</label>
-  <textarea id="nbStages" rows="3" placeholder="开端:1-10&#10;发展:11-25&#10;终局:26-30"></textarea>
+  <textarea id="nbStages" rows="3" placeholder="开端:1-10&#10;发展:11-25&#10;结局:26-30"></textarea>
   <label><input type="checkbox" id="nbAi" checked> 用 AI 生成世界观/大纲/脑洞/红线（需 Key，约1分钟）</label>
   <button class="sec" onclick="doNewBook()">🚀 创建新书</button>
   <div class="status" id="stNew"></div>
