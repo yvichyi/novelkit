@@ -204,6 +204,27 @@ def save_env_key(key):
         pass
 
 
+# ================= 引擎参数（novel_config/engine.json，每本书可调）=================
+def engine_path(bid):
+    return book_dir(bid) / "novel_config" / "engine.json"
+
+
+def load_engine(bid):
+    p = engine_path(bid)
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:
+        return {}
+
+
+def save_engine(bid, data):
+    p = engine_path(bid)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
+
 def local_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -220,8 +241,8 @@ def strip_ansi(s):
 
 
 # ================= 写章 / 预览 =================
-def start_write(bid, count, key, pro_from=None):
-    t = new_task("write", f"写「{'《介质》' if bid=='__default__' else bid}」{count} 章")
+def start_write(bid, count, key, pro_from=None, start=None):
+    t = new_task("write", f"写「{'《介质》' if bid=='__default__' else bid}」{count} 章" + (f"（从第{start}章）" if start else ""))
     d = book_dir(bid)
     env = {}
     if key:
@@ -229,6 +250,8 @@ def start_write(bid, count, key, pro_from=None):
     if bid != "__default__":
         env["NOVEL_DIR"] = str(d)
     cmd = [PY, "-u", "write_chapter.py", "--write", str(count)]
+    if start:
+        cmd += ["--start", str(start)]
     if pro_from:
         cmd += ["--pro-from", str(pro_from)]
     # cwd 必须永远是脚本目录（write_chapter.py 在这）；新书靠 NOVEL_DIR 环境变量定位
@@ -248,25 +271,31 @@ def start_preview(bid):
 
 
 # ================= 建新书 =================
-def start_newbook(name, intro, protagonist, total, use_ai, key):
+def start_newbook(name, intro, protagonist, total, use_ai, key, stages=None):
     t = new_task("newbook", f"建新书《{name}》")
     total_n = max(int(total), 1)
-    # 生成默认 3 阶段
-    if total_n <= 3:
-        thirds = [total_n]
+    if stages:
+        # 前端传来自定义阶段（已校验过）：[{"name","ch_lo","ch_hi","desc"}]
+        for s in stages:
+            s["ch_lo"] = max(int(s["ch_lo"]), 1)
+            s["ch_hi"] = min(max(int(s["ch_hi"]), s["ch_lo"]), total_n)
     else:
-        a = max(1, total_n // 3)
-        b = max(a + 1, (total_n * 2) // 3)
-        thirds = [a, b - a, total_n - b + 1]
-    stages = []
-    lo = 1
-    for i, ln in enumerate(thirds):
-        hi = min(lo + ln - 1, total_n)
-        if lo > total_n:
-            break
-        stages.append({"name": ["开端", "发展", "终局"][i] if i < 3 else f"阶段{i+1}",
-                       "ch_lo": lo, "ch_hi": hi, "desc": ""})
-        lo = hi + 1
+        # 生成默认 3 阶段
+        if total_n <= 3:
+            thirds = [total_n]
+        else:
+            a = max(1, total_n // 3)
+            b = max(a + 1, (total_n * 2) // 3)
+            thirds = [a, b - a, total_n - b + 1]
+        stages = []
+        lo = 1
+        for i, ln in enumerate(thirds):
+            hi = min(lo + ln - 1, total_n)
+            if lo > total_n:
+                break
+            stages.append({"name": ["开端", "发展", "终局"][i] if i < 3 else f"阶段{i+1}",
+                           "ch_lo": lo, "ch_hi": hi, "desc": ""})
+            lo = hi + 1
     def _fn():
         sys.path.insert(0, str(SCRIPT_DIR))
         import new_novel
@@ -336,6 +365,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"第{no}章暂无评审反馈"}, 404)
             else:
                 self._text(p.read_text(encoding="utf-8", errors="replace"))
+        elif path == "/api/engine":
+            bid = q.get("book", ["__default__"])[0]
+            self._json({"book": bid, "engine": load_engine(bid),
+                        "defaults": {"write": {"max_tokens": 12000, "thinking": "enabled",
+                                               "reasoning_effort": "medium"},
+                                     "review": {"max_tokens": 1200, "thinking": "disabled"},
+                                     "polish": {"max_tokens": 12000, "thinking": "disabled"}}})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -351,8 +387,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/write":
             bid = body.get("book", "__default__")
             count = max(int(body.get("count", 1)), 1)
+            start = body.get("start") or None
+            if start is not None:
+                start = max(int(start), 1)
             key = body.get("key") or load_env_key()
-            t = start_write(bid, count, key)
+            t = start_write(bid, count, key, start=start)
             self._json({"task": t.to_dict()})
         elif path == "/api/preview":
             bid = body.get("book", "__default__")
@@ -369,11 +408,29 @@ class Handler(BaseHTTPRequestHandler):
             key = body.get("key") or load_env_key()
             if use_ai and not key:
                 self._json({"error": "AI 生成设定需要 API Key，请先在「设置」里填 Key"}, 400)
+            total = max(int(body.get("total", 30)), 1)
+            stages = None
+            raw = body.get("stages")  # 格式："阶段名:起-止" 每行一个，如 "开端:1-10"
+            if raw:
+                stages = []
+                for ln in str(raw).splitlines():
+                    ln = ln.strip()
+                    if not ln:
+                        continue
+                    if ":" in ln:
+                        nm, rng = ln.split(":", 1)
+                    else:
+                        nm, rng = f"阶段{len(stages)+1}", ln
+                    nm = nm.strip() or f"阶段{len(stages)+1}"
+                    rng = rng.strip().replace("第", "").replace("章", "").replace("～", "-").replace("~", "-").replace("—", "-")
+                    parts = [p for p in rng.split("-") if p.strip().isdigit()]
+                    if len(parts) < 2:
+                        self._json({"error": f"阶段「{ln}」格式不对，示例：开端:1-10"}, 400)
+                    stages.append({"name": nm, "ch_lo": int(parts[0]), "ch_hi": int(parts[1]), "desc": ""})
             t = start_newbook(name,
                               body.get("intro", "").strip(),
                               body.get("protagonist", "").strip(),
-                              body.get("total", 30),
-                              use_ai, key)
+                              total, use_ai, key, stages=stages)
             self._json({"task": t.to_dict()})
         elif path == "/api/savekey":
             key = body.get("key", "").strip()
@@ -382,6 +439,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True})
             else:
                 self._json({"error": "Key 格式不对（应以 sk- 开头）"}, 400)
+        elif path == "/api/engine":
+            bid = body.get("book", "__default__")
+            data = body.get("engine")
+            if not isinstance(data, dict) or not isinstance(data.get("write"), dict):
+                self._json({"error": "参数格式不对（需要 engine.write 对象）"}, 400)
+            save_engine(bid, data)
+            self._json({"ok": True, "saved": data})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -467,6 +531,12 @@ PAGE = r"""<!DOCTYPE html>
 <div class="card">
   <button class="big" id="btnWrite" onclick="doWrite()">✍️ 写下一章</button>
   <div class="row">
+    <div><label>起始章（留空=下一章）</label>
+      <input id="wtStart" type="number" min="1" placeholder="自动"></div>
+    <div><label>写几章</label>
+      <input id="wtCount" type="number" min="1" value="1"></div>
+  </div>
+  <div class="row">
     <button class="sec" onclick="doPreview()">👁 预览 prompt</button>
     <button class="sec" onclick="showChaps()">📄 已写章节</button>
   </div>
@@ -483,6 +553,8 @@ PAGE = r"""<!DOCTYPE html>
   <div class="row">
     <input id="nbTotal" type="number" min="1" value="30" placeholder="总章数">
   </div>
+  <label>阶段规划（每行一个「阶段名:起-止章」，留空=自动3阶段）</label>
+  <textarea id="nbStages" rows="3" placeholder="开端:1-10&#10;发展:11-25&#10;终局:26-30"></textarea>
   <label><input type="checkbox" id="nbAi" checked> 用 AI 生成世界观/大纲/脑洞/红线（需 Key，约1分钟）</label>
   <button class="sec" onclick="doNewBook()">🚀 创建新书</button>
   <div class="status" id="stNew"></div>
@@ -495,6 +567,23 @@ PAGE = r"""<!DOCTYPE html>
   <input id="keyInput" placeholder="DeepSeek API Key（sk-...）" type="password">
   <button class="sec" onclick="saveKey()">💾 保存 Key</button>
   <div class="status" id="stKey"></div>
+  <hr style="border:0;border-top:1px solid var(--line);margin:12px 0;">
+  <div class="sub" style="text-align:left;font-size:13px;color:var(--sub);">⚡ 引擎参数（只对当前书生效，改完即生效）</div>
+  <label>正文写作思考（write.thinking）</label>
+  <select id="egThinking">
+    <option value="enabled">开 · 先构思再写（质量好，慢）</option>
+    <option value="disabled">关 · 直接写（快省，可能降质）</option>
+  </select>
+  <label>思考强度（write.reasoning_effort）</label>
+  <select id="egEffort">
+    <option value="low">low · 快省，易写飞</option>
+    <option value="medium">medium · 推荐（稳）</option>
+    <option value="high">high · 慢贵，易卡</option>
+  </select>
+  <label>正文 token 上限（write.max_tokens，含思考）</label>
+  <input id="egMax" type="number" min="1000" step="500" placeholder="12000">
+  <button class="sec" onclick="saveEngine()">💾 保存引擎参数</button>
+  <div class="status" id="stEg"></div>
 </div>
 
 <footer>写作台 · 同 Wi-Fi 的家人朋友也能连 · 关掉本页 = 停止服务</footer>
@@ -522,7 +611,7 @@ async function refreshBooks(){
     const div = document.createElement("div");
     div.className = "bookbtn" + (b.id===cur ? " sel" : "");
     div.innerHTML = `<div><strong>${esc(b.name)}</strong><br><small>已写 ${b.chapters} 章 · 下一章 第${b.next_no}章</small></div>`;
-    div.onclick = () => { cur = b.id; refreshBooks(); };
+    div.onclick = () => { cur = b.id; refreshBooks(); loadEngine(); };
     el.appendChild(div);
   }
   $("addr").textContent = "局域网地址：http://" + (d.ip||"") + ":" + location.port + "  ·  家人手机同 Wi-Fi 可连";
@@ -551,10 +640,13 @@ function poll(tid, stEl, logEl, doneMsg){
 }
 
 function doWrite(){
-  if(!confirm(`写《${bookName()}》下一章？\n（约1~2分钟，自动落盘）`)) return;
+  const start = parseInt($("wtStart").value) || undefined;
+  const count = parseInt($("wtCount").value) || 1;
+  const from = start ? `从第${start}章起` : "下一章";
+  if(!confirm(`写《${bookName()}》${from}，共 ${count} 章？\n（约1~2分钟/章，自动落盘）`)) return;
   setSt("stWrite", "⏳ 启动中…", "run");
   api("/api/write", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({book: cur, count: 1, key: $("keyInput").value || undefined})})
+      body: JSON.stringify({book: cur, count, start, key: $("keyInput").value || undefined})})
     .then(d => { if(d.task) poll(d.task.id, "stWrite", "logWrite", `《${bookName()}》已写好！去「已写章节」看吧`); });
 }
 
@@ -584,6 +676,7 @@ function doNewBook(){
   api("/api/newbook", {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({name, intro:$("nbIntro").value.trim(),
         protagonist:$("nbProt").value.trim(), total:parseInt($("nbTotal").value)||30,
+        stages:$("nbStages").value.trim() || undefined,
         ai:$("nbAi").checked, key:$("keyInput").value || undefined})})
     .then(d => {
       if(d.error){ setSt("stNew", "⚠️ " + d.error, "err"); return; }
@@ -600,7 +693,34 @@ async function saveKey(){
   else setSt("stKey", "⚠️ " + (d.error||"保存失败"), "err");
 }
 
+// ===== 引擎参数（每本书可调）=====
+let egDefaults = {};
+async function loadEngine(){
+  const d = await api("/api/engine?book=" + encodeURIComponent(cur));
+  egDefaults = d.defaults || {};
+  const e = d.engine || {};
+  const w = e.write || {};
+  $("egThinking").value = w.thinking || egDefaults.write.thinking || "enabled";
+  $("egEffort").value = w.reasoning_effort || egDefaults.write.reasoning_effort || "medium";
+  $("egMax").value = w.max_tokens || egDefaults.write.max_tokens || 12000;
+}
+async function saveEngine(){
+  const data = {
+    write: {
+      thinking: $("egThinking").value,
+      reasoning_effort: $("egEffort").value,
+      max_tokens: parseInt($("egMax").value) || 12000
+    }
+  };
+  setSt("stEg", "⏳ 保存中…", "run");
+  const d = await api("/api/engine", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({book: cur, engine: data})});
+  if(d.ok){ setSt("stEg", "✅ 已保存，写下一章即生效", "ok"); }
+  else setSt("stEg", "⚠️ " + (d.error||"保存失败"), "err");
+}
+
 refreshBooks();
+loadEngine();
 </script>
 </body>
 </html>

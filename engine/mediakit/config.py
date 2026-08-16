@@ -44,6 +44,33 @@ def _read_json(name):
     p = _nc / name
     return _json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
 
+# ---- 引擎参数（每本书 novel_config/engine.json 可调；环境变量 NOVELKIT_<区>_<键> 可覆盖）----
+# 例：engine.json 里 "write": {"max_tokens": 8000, "thinking": "enabled", "reasoning_effort": "medium"}
+# 环境变量：NOVELKIT_WRITE_MAX_TOKENS=8000 等。
+_ENGINE = _read_json("engine.json")
+
+def engine_opt(section, key, default=None):
+    """取 engine.json 的 section 块里的 key；环境变量优先；缺省返回 default。"""
+    env = os.environ.get(f"NOVELKIT_{section.upper()}_{key.upper()}")
+    if env is not None and env != "":
+        return env
+    sec = _ENGINE.get(section, {}) if isinstance(_ENGINE, dict) else {}
+    if isinstance(sec, dict) and sec.get(key) is not None:
+        return sec[key]
+    return default
+
+# 正文写作：thinking=None=跟随 API 默认（开思考）；"disabled"=关思考（快但可能降质）；"enabled"=强制开
+WRITE_MAX_TOKENS  = int(engine_opt("write", "max_tokens", MAX_TOKENS))
+WRITE_THINKING    = engine_opt("write", "thinking")
+WRITE_REASONING   = engine_opt("write", "reasoning_effort") or "medium"
+# 评审（结构化输出，默认关思考防"思考吃光 token 返回空"）
+REVIEW_MAX_TOKENS = int(engine_opt("review", "max_tokens", 1200))
+REVIEW_THINKING   = engine_opt("review", "thinking") or "disabled"
+# 润色
+POLISH_MAX_TOKENS = int(engine_opt("polish", "max_tokens", MAX_TOKENS))
+POLISH_THINKING   = engine_opt("polish", "thinking") or "disabled"
+REASONING_EFFORT  = os.environ.get("DEEPSEEK_REASONING_EFFORT") or WRITE_REASONING
+
 # ---- 文本类 ----
 QWEN_PERSONA = _read_text("persona_qwen.md")
 KIMI_PERSONA = _read_text("persona_kimi.md")

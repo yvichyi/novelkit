@@ -483,7 +483,7 @@ async def review_chapter(ch_no, text, key):
             + "【伏笔】本章新埋设的伏笔（写：名称｜级别A/B/C｜预计回收阶段），或已回收的伏笔（写：回收｜名称）；无则写'无'\n"
             + "禁止输出其他内容。"
         )
-        reply = await client.chat(prompt, temperature=0.3, max_tokens=800)
+        reply = await client.chat(prompt, temperature=0.3, max_tokens=m.REVIEW_MAX_TOKENS, thinking=m.REVIEW_THINKING)
         # 落盘评审反馈（下一章读取）
         REVIEW_DIR.mkdir(parents=True, exist_ok=True)
         (REVIEW_DIR / f"第{ch_no}章.md").write_text(reply, encoding="utf-8")
@@ -608,7 +608,7 @@ async def polish_chapter(ch_no, draft, key, model_id):
             "4. 保持第一行标题「第X章」不变，正文1500~3000字；\n"
             "5. 直接输出润色后的纯小说正文，不要任何说明、不要复述草稿。"
         )
-        polished = await client.chat(prompt, temperature=0.6, max_tokens=m.MAX_TOKENS)
+        polished = await client.chat(prompt, temperature=0.6, max_tokens=m.POLISH_MAX_TOKENS, thinking=m.POLISH_THINKING)
         # 润色成本记账（ch 标注 polish:N，与正史章区分）
         try:
             u = usage_dict(client, model_id)
@@ -639,7 +639,7 @@ async def write_one_chapter(ch_no, args, key, model_id):
     print("⏳ 生成中（思考模型约0.5~2分钟，请勿关闭）…", flush=True)
     t0 = time.time()
     try:
-        reply = await client.chat(prompt, temperature=0.8, max_tokens=m.MAX_TOKENS)
+        reply = await client.chat(prompt, temperature=0.8, max_tokens=m.WRITE_MAX_TOKENS, thinking=m.WRITE_THINKING)
     except Exception as e:
         print(f"❌ 生成失败：{e}")
         return "failed"

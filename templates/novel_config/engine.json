@@ -1,0 +1,15 @@
+{
+  "write": {
+    "max_tokens": 12000,
+    "thinking": "enabled",
+    "reasoning_effort": "medium"
+  },
+  "review": {
+    "max_tokens": 1200,
+    "thinking": "disabled"
+  },
+  "polish": {
+    "max_tokens": 12000,
+    "thinking": "disabled"
+  }
+}

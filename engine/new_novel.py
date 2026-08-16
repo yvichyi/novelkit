@@ -102,15 +102,23 @@ def ask_stage_plan(total_chapters: int):
         defaults = [(1, 10), (11, min(25, total_chapters)), (min(26, total_chapters + 1), total_chapters)]
         names = ["开端", "发展", "终局"]
     else:
-        # 均分章数
+        # 每个阶段的起止章都手填（傻瓜式：显示可用区间，回车=自动续排）
         defaults = []
-        step = max(1, total_chapters // n)
-        lo = 1
+        auto_lo = 1
         for i in range(n):
-            hi = total_chapters if i == n - 1 else min(lo + step - 1, total_chapters)
+            if i == n - 1:
+                lo = auto_lo
+                hi = total_chapters
+            else:
+                q = ask(f"   阶段{i + 1} 从第几章开始？[回车=自动续排]", str(auto_lo)).strip()
+                lo = int(q) if q.isdigit() and 1 <= int(q) <= total_chapters else auto_lo
+                hi = ask(f"   阶段{i + 1} 到第几章结束？[回车=下一阶段自动续排]", "").strip()
+                hi = int(hi) if hi.isdigit() and lo <= int(hi) <= total_chapters else min(lo + max(1, total_chapters // n) - 1, total_chapters)
+            if lo > total_chapters:
+                break
             defaults.append((lo, hi))
-            lo = hi + 1
-        names = [f"阶段{i + 1}" for i in range(n)]
+            auto_lo = hi + 1
+        names = [f"阶段{i + 1}" for i in range(len(defaults))]
     for i, (lo, hi) in enumerate(defaults):
         if lo > total_chapters:
             break

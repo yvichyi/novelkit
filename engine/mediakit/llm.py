@@ -67,7 +67,7 @@ class LLMClient:
             # 在裁剪处插入占位提示，让 AI 知道前面聊过但被精简了
             self.history = [keep[0]] + [{"role": "user", "content": "（前情已压缩省略，继续当前话题，不要重复已写过的内容）"}] + keep[1:]
 
-    def _call(self, temperature, max_tokens):
+    def _call(self, temperature, max_tokens, thinking=None):
         """流式调用 OpenAI 兼容接口（SSE 实时输出）；无超时；断连自动断点续写重试"""
         print(f"\n⏳ {self.name} 开始生成（流式实时输出）…\n", flush=True)
         payload_base = {
@@ -79,6 +79,10 @@ class LLMClient:
             "stream_options": {"include_usage": True},  # v2.8：返回 token 用量（缓存命中/未命中/输出）
             "reasoning_effort": REASONING_EFFORT,  # 思考强度：low=快省成本（写作执行任务够用）
         }
+        if thinking:
+            payload_base["thinking"] = {"type": thinking}  # disabled=关闭思考（评审/结构化任务）
+            if thinking == "disabled":
+                payload_base.pop("reasoning_effort", None)  # 思考已关就不发思考强度，避免 API 冲突/报错
         last_err = None
         prefix = ""  # 断连前已收到的内容（断点续写用，不白费）
         last_payload = None
@@ -206,12 +210,13 @@ class LLMClient:
             {"role": "assistant", "content": "好的，我已记住前情摘要与设定一致性清单，将继续推进。"},
         ]
 
-    async def chat(self, text, temperature=0.9, max_tokens=MAX_TOKENS):
-        """发一条消息，返回 AI 回复；自动维护对话历史 + 记忆裁剪"""
+    async def chat(self, text, temperature=0.9, max_tokens=MAX_TOKENS, thinking=None):
+        """发一条消息，返回 AI 回复；自动维护对话历史 + 记忆裁剪。
+        thinking: None=默认思考模式（跟随 API）；'disabled'=关闭思考（结构化任务/短输出用，快且不空）；'enabled'=强制思考"""
         self._trim_history()  # 发请求前先裁剪，省 token
         self.history.append({"role": "user", "content": text})
         try:
-            reply = await asyncio.to_thread(self._call, temperature, max_tokens)
+            reply = await asyncio.to_thread(self._call, temperature, max_tokens, thinking)
             self.history.append({"role": "assistant", "content": reply})
             return reply
         except Exception:
