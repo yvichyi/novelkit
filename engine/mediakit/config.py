@@ -140,9 +140,36 @@ __MESSAGES__
 </html>"""
 
 DEEPSEEK_PRICE = {
-    "deepseek-v4-flash": {"cache_hit": 0.02, "cache_miss": 1.0, "output": 2.0},
-    "deepseek-v4-pro":   {"cache_hit": 0.025, "cache_miss": 3.0, "output": 6.0},
+    # 2026-08-17 起峰谷定价（元/百万 tokens）：高峰=北京时间 9-12点、14-18点；其余空闲=半价
+    "deepseek-v4-flash": {
+        "peak":   {"cache_hit": 0.10, "cache_miss": 3.0, "output": 9.0},
+        "offpeak": {"cache_hit": 0.05, "cache_miss": 1.5, "output": 4.5},
+    },
+    "deepseek-v4-pro": {
+        "peak":   {"cache_hit": 0.30, "cache_miss": 9.0, "output": 27.0},
+        "offpeak": {"cache_hit": 0.15, "cache_miss": 4.5, "output": 13.5},
+    },
 }
+
+
+def _is_peak_hour(when=None):
+    """北京时间高峰：9:00-12:00、14:00-18:00（其余空闲）。固定用 UTC+8，不受服务器时区影响。"""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    dt = when or _dt.now(_tz(_td(hours=8)))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_tz(_td(hours=8)))
+    h = dt.hour
+    return (9 <= h < 12) or (14 <= h < 18)
+
+
+def price_for(model, when=None):
+    """按当前时段返回模型单价 dict {cache_hit, cache_miss, output}；旧结构（单档）直接返回；无此模型返回 None"""
+    p = DEEPSEEK_PRICE.get(model)
+    if not p:
+        return None
+    if "peak" in p and "offpeak" in p:
+        return p["peak"] if _is_peak_hour(when) else p["offpeak"]
+    return p
 
 STATE_FILE = "ai_bridge_state.json"
 

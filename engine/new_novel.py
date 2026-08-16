@@ -66,6 +66,15 @@ def load_key(arg_key: str) -> str:
                         return line.split("=", 1)[1].strip().strip('"').strip("'")
             except Exception:
                 pass
+    # 无 key：交互式（有 tty）→ 询问；非交互（管道/EOF）→ 明确报错并退出（不静默用空 key 全失败）
+    try:
+        import sys as _sys
+        is_tty = _sys.stdin.isatty()
+    except Exception:
+        is_tty = False
+    if not is_tty:
+        print(f"{C_R}❌ 没找到 API Key。请先：echo 'DEEPSEEK_API_KEY=sk-xxx' > .env  （或 --key sk-xxx）{C_0}")
+        sys.exit(2)
     print(f"{C_Y}🔑 需要 DeepSeek API Key（platform.deepseek.com 申请，新用户有免费额度）{C_0}")
     key = ask("   粘贴 Key（sk-...）：")
     if not key:

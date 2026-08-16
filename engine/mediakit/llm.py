@@ -5,7 +5,7 @@ import asyncio
 import json
 import urllib.request
 import urllib.error
-from .config import DEEPSEEK_PRICE, MAX_TOKENS, REASONING_EFFORT
+from .config import DEEPSEEK_PRICE, MAX_TOKENS, REASONING_EFFORT, price_for
 
 
 _usage = {"cache_hit": 0, "cache_miss": 0, "output": 0, "cost": 0.0, "calls": 0, "by_model": {}}
@@ -15,7 +15,7 @@ def record_usage(model, usage):
     hit = usage.get("prompt_cache_hit_tokens", 0) or 0
     miss = usage.get("prompt_cache_miss_tokens", 0) or 0
     out = usage.get("completion_tokens", 0) or 0
-    price = DEEPSEEK_PRICE.get(model)
+    price = price_for(model)
     cost = 0.0
     if price:
         cost = (hit * price["cache_hit"] + miss * price["cache_miss"] + out * price["output"]) / 1_000_000
@@ -81,6 +81,7 @@ class LLMClient:
         }
         last_err = None
         prefix = ""  # 断连前已收到的内容（断点续写用，不白费）
+        last_payload = None
         for attempt in range(4):  # 首次 + 3 次重试（403 间歇性额度耗尽也重试）
             payload = dict(payload_base)
             if prefix:
@@ -89,6 +90,8 @@ class LLMClient:
                     {"role": "assistant", "content": prefix},
                     {"role": "user", "content": "（以上是你已写的内容，请直接从断点继续完成，不要重复已写内容）"},
                 ]
+            last_payload = payload
+            if prefix:
                 print(f"\n↻ 断点续写：已保留 {len(prefix)} 字，继续生成…", flush=True)
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions",
@@ -139,6 +142,12 @@ class LLMClient:
                 if last_usage:
                     record_usage(self.model, last_usage)
                     self.last_usage = last_usage
+                else:
+                    # deepseek-v4 流式不返回 usage：用非流式探针补一次精确用量（同一 prompt，max_tokens=1，
+                    # 缓存命中后成本≈0.0002元；失败则 usage 保持 None，由调用方显示"不可用"）
+                    self.last_usage = self._probe_usage(last_payload)
+                    if self.last_usage:
+                        record_usage(self.model, self.last_usage)
                 if not text.strip():
                     raise RuntimeError("流式响应为空")
                 return (prefix + text).strip()
@@ -160,6 +169,30 @@ class LLMClient:
                 import time as _t
                 _t.sleep(_wait)
         raise RuntimeError(f"网络请求失败（重试4次仍失败，已保留 {len(prefix)} 字）: {last_err}")
+
+    def _probe_usage(self, payload):
+        """非流式用量探针：deepseek-v4 流式不返回 usage，用同一 prompt 发一个 max_tokens=1 的非流式请求，
+        精确拿到 prompt_cache_hit/miss。缓存命中后 prompt 部分极便宜（≈0.02元/M），失败返回 None 不阻塞。"""
+        if not payload:
+            return None
+        try:
+            probe = dict(payload)
+            probe["stream"] = False
+            probe["max_tokens"] = 1
+            req = urllib.request.Request(
+                f"{self.base_url}/chat/completions",
+                data=json.dumps(probe, ensure_ascii=False).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                d = json.loads(resp.read().decode("utf-8"))
+            return d.get("usage") or None
+        except Exception:
+            return None
 
     def reset_context_with_summary(self, summary, checklist=""):
         """摘要压缩：清空上下文，只保留人设 + 前情摘要 + 设定一致性清单（记忆不丢，token 大减）"""

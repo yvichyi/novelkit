@@ -93,16 +93,17 @@ RECENT_FULL = 8          # 前文滚动窗口：只保留最近 N 章全文，�
 
 
 def load_env_key():
-    """从项目根 .env 读 DEEPSEEK_API_KEY（傻瓜模式：Key 只填一次）"""
-    env_p = BASE / ".env"
-    if env_p.exists():
-        try:
-            for line in env_p.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if line.startswith("DEEPSEEK_API_KEY="):
-                    return line.split("=", 1)[1].strip().strip('"').strip("'")
-        except Exception:
-            pass
+    """从项目 .env 读 DEEPSEEK_API_KEY（傻瓜模式：Key 只填一次）
+    优先读脚本目录 .env（写章/建书共用），回退父目录（兼容旧布局）"""
+    for env_p in (SCRIPT_DIR / ".env", BASE / ".env"):
+        if env_p.exists():
+            try:
+                for line in env_p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line.startswith("DEEPSEEK_API_KEY="):
+                        return line.split("=", 1)[1].strip().strip('"').strip("'")
+            except Exception:
+                pass
     return None
 
 
@@ -448,7 +449,7 @@ def usage_dict(client, model_id):
     hit = u.get("prompt_cache_hit_tokens", 0) or 0
     miss = u.get("prompt_cache_miss_tokens", 0) or 0
     out = u.get("completion_tokens", 0) or 0
-    p = m.DEEPSEEK_PRICE.get(model_id)
+    p = m.price_for(model_id)
     cost = 0.0
     if p:
         cost = (hit * p["cache_hit"] + miss * p["cache_miss"] + out * p["output"]) / 1_000_000
