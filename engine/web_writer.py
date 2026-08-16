@@ -421,7 +421,7 @@ class Handler(BaseHTTPRequestHandler):
             src_md.write_text(merged, encoding="utf-8")
             if fmt == "epub":
                 dst = outdir / f"{safe}.epub"
-                _epub_build(str(src_md), str(dst), title=name)
+                _epub_build(str(src_md), str(dst), book_title=name)
             else:
                 dst = outdir / f"{safe}.txt"
                 _txt_build(str(src_md), str(dst))
@@ -431,7 +431,12 @@ class Handler(BaseHTTPRequestHandler):
             data = dst.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "application/epub+zip" if fmt == "epub" else "text/plain; charset=utf-8")
-            self.send_header("Content-Disposition", f'attachment; filename="{dst.name}"')
+            # 中文文件名 → Content-Disposition 头 latin-1 编码会崩；用 RFC 5987 filename* 传中文名 + ASCII 兜底
+            from urllib.parse import quote
+            _ascii = (dst.name.encode("ascii", "replace").decode("ascii") or "novel")
+            _star = "''"   # RFC 5987 的 filename* 分隔符（避免 f-string 里裸单引号断串）
+            self.send_header("Content-Disposition",
+                             f'attachment; filename="{_ascii}"; filename*=UTF-8{_star}{quote(dst.name)}')
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -773,7 +778,12 @@ async function doExport(fmt){
     const blob = await r.blob();
     const a = document.createElement("a");
     const obj = URL.createObjectURL(blob);
-    a.href = obj; a.download = (r.headers.get("Content-Disposition")||"").match(/filename="([^"]+)"/)?.[1] || (fmt==="epub"?"novel.epub":"novel.txt");
+    a.href = obj;
+    const cd = r.headers.get("Content-Disposition")||"";
+    // 优先 filename*=UTF-8''中文名，回退 filename="ascii"，再回退默认名
+    const star = cd.match(/filename\*=UTF-8''([^;]+)/i);
+    const plain = cd.match(/filename="([^"]+)"/);
+    a.download = star ? decodeURIComponent(star[1]) : (plain ? plain[1] : (fmt==="epub"?"novel.epub":"novel.txt"));
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(obj);
     setSt("stWrite", `✅ 已导出 ${a.download}`, "ok");
   }catch(e){ setSt("stWrite", "❌ 导出异常: " + e, "err"); }
