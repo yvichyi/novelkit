@@ -15,7 +15,7 @@
   user 前缀 = 世界观精简版 → 分层大纲 → 正史卡 → 已写前文（累积递增）。
   前文只增不删 → 缓存前缀稳定 → 命中率随连载升高。
 
-数据落盘：01_正史账本/usage.jsonl（命中/未命中/输出/费用，写作仪表盘自动读）
+数据落盘：01_正史账本/usage.jsonl（命中/未命中/输出/费用）
 
 用法：
   python write_chapter.py --preview                  # 预览下一章 prompt
@@ -85,7 +85,7 @@ else:
     PUBLISHED = BASE / "已发布正文"
     REVIEW_DIR = LEDGER / "评审反馈"           # A1 评审闭环：每章写完后 flash 快速评审，下章注入整改清单
     USAGE_JSONL = LEDGER / "usage.jsonl"
-FUSED_DIR = (Path(NOVEL_DIR) / "已发布正文_熔断待修") if NOVEL_DIR else (BASE / "已发布正文_熔断待修")  # 熔断正文不丢弃，存这里供手动修复/复用
+FUSED_DIR = (Path(NOVEL_DIR) / "待修复正文") if NOVEL_DIR else (BASE / "待修复正文")  # 未通过门禁的正文不丢弃，存这里供手动修复/复用
 
 BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 PRO_FROM_DEFAULT = 181   # 后期起切 pro
@@ -773,7 +773,7 @@ async def main():
         if r == "ok":
             ok_cnt += 1
 
-    print(f"\n🏁 完成。本次落盘 {ok_cnt} 章。刷新 写作仪表盘.html 查看最新进度。")
+    print(f"\n🏁 完成。本次落盘 {ok_cnt} 章。费用与缓存命中见 01_正史账本/usage.jsonl。")
 
 
 if __name__ == "__main__":
