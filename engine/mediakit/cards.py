@@ -29,7 +29,7 @@ def extract_unresolved_foreshadow(checklist, limit=8):
     return "\n".join("- " + x for x in out)
 
 def extract_memory_card(checklist, limit_status=1):
-    """P8：从清单提取'记忆快照'——最新【状态】卡 + 硬设定红线 + 柯德声音锚点（紧凑，供星尘写作前读取，防细节漂移）"""
+    """P8：从清单提取'记忆快照'——最新【状态】卡 + 硬设定红线 + 主角声音锚点（紧凑，供写作模型读取，防细节漂移）"""
     if not checklist:
         return ""
     parts = []
@@ -46,18 +46,18 @@ def extract_memory_card(checklist, limit_status=1):
                 break
     if hard_rules:
         parts.append("【硬设定红线（不可违反）】\n" + "\n".join("- " + r for r in hard_rules[:5]))
-    # 3) 柯德声音锚点（人物辨识度）
+    # 3) 主角声音锚点（人物辨识度）
     voice = []
     for l in checklist.split("\n"):
         if any(k in l for k in ["吐槽", "毒舌", "直率", "冷静", "克制", "算账", "声音"]):
             if l.strip().startswith("-"):
                 voice.append(l.strip().lstrip("- ").strip())
     if voice:
-        parts.append("【柯德声音（人物辨识度）】\n" + "\n".join("- " + v for v in voice[:3]))
+        parts.append("【主角声音（人物辨识度）】\n" + "\n".join("- " + v for v in voice[:3]))
     return "\n\n".join(parts)
 
 def extract_style_samples(story_text, count=3):
-    """P9：从正文抽取高光片段作为文风样本（每段约120字，供星尘写作前对齐文风）"""
+    """P9：从正文抽取高光片段作为文风样本（每段约120字，供写作模型对齐文风）"""
     if not story_text:
         return ""
     # 抽取各章开头段（通常是最精炼的感官锚点）
@@ -110,7 +110,7 @@ def build_task_card(anchor_state, rhythm, checklist, outline):
     parts.append("· 节奏提醒：" + ("；".join(warns) if warns else "正常（按计数器无超限）"))
     un = extract_unresolved_foreshadow(checklist, limit=1)
     parts.append("· 可选回收伏笔：" + un if un else "· 可选回收伏笔：无（本章可不埋伏笔）")
-    parts.append("· 硬指标（写完逐条核对）：时间锚点（开头交代异常期第X天/失控期第X周）｜现实术语≥3处（定律名嵌进感官/动作）｜柯德声音2~3处（毒舌/吐槽/直率）｜结尾钩子｜生理基线一笔（喝水/找食/疲惫）")
+    parts.append("· 硬指标（写完逐条核对）：时间锚点（开头交代异常期第X天/失控期第X周）｜现实术语≥3处（定律名嵌进感官/动作）｜主角声音2~3处（毒舌/吐槽/直率）｜结尾钩子｜生理基线一笔（喝水/找食/疲惫）")
     return "\n".join(parts)
 
 def build_setting_card(chapter_no, outline):
@@ -499,7 +499,7 @@ def build_memory_doc(outdir, checklist):
     try:
         states = [l.strip().lstrip("- ").replace("【状态】", "") for l in checklist.split("\n") if l.strip().startswith("- 【状态】")]
         if states:
-            parts.append("【柯德状态（最新）】" + states[-1])
+            parts.append("【主角状态（最新）】" + states[-1])
     except Exception:
         pass
     return "\n\n".join(parts)
@@ -563,7 +563,7 @@ def append_score_history(outdir, chapter_no, stage_name, scores):
         pass
 
 def score_warning(outdir, min_score=2):
-    """C2：读评分卡最近两章，任一维度连续<=2 返回警告文本（注入下一轮星尘写章）"""
+    """C2：读评分卡最近两章，任一维度连续<=2 返回警告文本（注入下一轮写章）"""
     try:
         p = outdir / "评分卡.md"
         if not p.exists():
@@ -582,14 +582,14 @@ def score_warning(outdir, min_score=2):
             if len(vals) == 2 and all(v <= min_score for v in vals):
                 low.append("{}（连续{}/{}分）".format(dim, vals[0], vals[1]))
         if low:
-            return "老K连续两章低分：" + "、".join(low) + "。本章必须重点对治（按低分项：推进锚/加现实术语/找柯德声音/加结尾钩子/显化设定/加末世氛围）。"
+            return "老K连续两章低分：" + "、".join(low) + "。本章必须重点对治（按低分项：推进锚/加现实术语/找主角声音/加结尾钩子/显化设定/加末世氛围）。"
     except Exception:
         pass
     return ""
 
 def build_progress_card(outdir, anchor_state, rhythm, checklist):
     """从正文+状态机+清单自动提取结构化进展卡（零幻觉零污染，正文=唯一事实源）
-    输出：章节轨迹（最近8章+时间）/主线位置/节奏计数器/柯德状态"""
+    输出：章节轨迹（最近8章+时间）/主线位置/节奏计数器/主角状态"""
     parts = []
     try:
         story = read_story_file(outdir)
@@ -612,7 +612,7 @@ def build_progress_card(outdir, anchor_state, rhythm, checklist):
     try:
         states = [l.strip() for l in checklist.split("\n") if l.strip().startswith("- 【状态】")]
         if states:
-            parts.append("【柯德状态】" + states[-1].lstrip("- 【状态】").strip())
+            parts.append("【主角状态】" + states[-1].lstrip("- 【状态】").strip())
     except Exception:
         pass
     return "\n".join(parts)
