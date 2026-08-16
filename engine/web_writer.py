@@ -6,7 +6,7 @@
   - 写默认书下一章 / 写新书下一章（后台跑，进度实时滚动）
   - 预览下一章 prompt（零成本）
   - 建新书（表单填写 + 可选 AI 生成设定）
-  - 读已写章节 / 看 AI 评审反馈
+  - 读已写章节 / 看评审反馈
   - 局域网内家人朋友手机/电脑也能连（同一 Wi-Fi）
 
 启动：  python3 web_writer.py            # 默认 8080 端口
@@ -31,16 +31,8 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BOOKS_DIR = SCRIPT_DIR / "books"
-# 双模式 BASE（数据根判定）：
-#  1) 本目录下有 已发布正文/ → 本目录就是默认书数据根（BASE=本目录）
-#  2) 父目录下有 已发布正文/ → 默认书数据在父目录（原项目布局）
-#  3) 都没有 → 通用仓库模式：默认书为空，用户用 books/* 或 new_novel.py 建书
-if (SCRIPT_DIR / "已发布正文").exists():
-    BASE = SCRIPT_DIR
-elif (SCRIPT_DIR.parent / "已发布正文").exists():
-    BASE = SCRIPT_DIR.parent
-else:
-    BASE = SCRIPT_DIR
+# 默认书数据根（ledger/已发布正文 所在）= 脚本目录的父目录（write_chapter.py 同款逻辑）
+BASE = SCRIPT_DIR.parent
 ENV_FILE = SCRIPT_DIR / ".env"
 PY = sys.executable
 
@@ -139,9 +131,9 @@ def run_in_thread(tid, fn):
 def list_books():
     """返回 [{id, name, is_default, chapters, next_no, dir}]"""
     out = []
-    # 默认书（BASE 数据根）
+    # 默认书
     pub = BASE / "已发布正文"
-    chs = sorted(pub.glob("第*章.md")) if pub.exists() else []
+    chs = sorted(pub.glob("第*章.md"), key=lambda x: int(re.search(r"第(\d+)章", x.name).group(1))) if pub.exists() else []
     out.append({"id": "__default__", "name": "默认书", "dir": str(SCRIPT_DIR),
                 "is_default": True, "chapters": len(chs), "next_no": len(chs) + 1})
     # books/ 下的新书
@@ -293,7 +285,7 @@ def start_newbook(name, intro, protagonist, total, use_ai, key, stages=None):
             hi = min(lo + ln - 1, total_n)
             if lo > total_n:
                 break
-            stages.append({"name": ["开端", "发展", "结局"][i] if i < 3 else f"阶段{i+1}",
+            stages.append({"name": ["开端", "发展", "终局"][i] if i < 3 else f"阶段{i+1}",
                            "ch_lo": lo, "ch_hi": hi, "desc": ""})
             lo = hi + 1
     def _fn():
@@ -372,6 +364,118 @@ class Handler(BaseHTTPRequestHandler):
                                                "reasoning_effort": "medium"},
                                      "review": {"max_tokens": 1200, "thinking": "disabled"},
                                      "polish": {"max_tokens": 12000, "thinking": "disabled"}}})
+        elif path == "/api/export":
+            # B 导出：?book=X&fmt=txt|epub → 合并章节 → 生成文件 → 直接下载
+            bid = q.get("book", ["__default__"])[0]
+            fmt = q.get("fmt", ["txt"])[0]
+            try:
+                from tools_gen_txt import build as _txt_build
+                from tools_gen_epub import build as _epub_build
+            except Exception as e:
+                self._json({"error": f"导出工具缺失: {e}"}, 500)
+                return
+            pub = book_published(bid)
+            chs = sorted(pub.glob("第*章.md"), key=lambda x: int(re.search(r"第(\d+)章", x.name).group(1))) if pub.exists() else []
+            if not chs:
+                self._json({"error": "还没有章节"}, 404)
+                return
+            # 合并成一个 md（按章号排序，标题统一为 ## 第X章 …，供 tools 解析）
+            # F 分卷（仅 epub）：按 STAGE_ANCHORS 阶段切卷，插入「# 卷X：阶段名」标记（epub 生成器按卷分组目录）
+            parts = []
+            if fmt == "epub":
+                import mediakit.config as _mc
+                anchors = _mc.STAGE_ANCHORS  # (name, a_lo, a_hi, ch_lo, ch_hi)
+                cur_vol = None
+                for p in chs:
+                    mo = re.search(r"第(\d+)章", p.name)
+                    no = int(mo.group(1)) if mo else 0
+                    vol_name = None
+                    for _r in anchors:
+                        if len(_r) >= 5 and _r[3] <= no <= _r[4]:
+                            vol_name = _r[0]
+                            break
+                    if vol_name is None and anchors:
+                        # 超出规划章数（番外/续写）→ 归入最后一卷，标记「续」
+                        vol_name = anchors[-1][0] + "·续"
+                    if vol_name and vol_name != cur_vol:
+                        cur_vol = vol_name
+                        parts.append(f"# 卷{len([x for x in parts if x.startswith('# 卷')]) + 1}：{vol_name}")
+                    t = p.read_text(encoding="utf-8", errors="replace").strip()
+                    first = t.splitlines()[0] if t else ""
+                    if re.match(r"^第\d+章\s", first):
+                        t = "## " + t
+                    parts.append(t)
+            else:
+                for p in chs:
+                    t = p.read_text(encoding="utf-8", errors="replace").strip()
+                    first = t.splitlines()[0] if t else ""
+                    if re.match(r"^第\d+章\s", first):
+                        t = "## " + t
+                    parts.append(t)
+            merged = "\n\n".join(parts)
+            name = "介质" if bid == "__default__" else bid
+            safe = re.sub(r'[\\/:*?"<>|\s]+', "_", name) or "novel"
+            import tempfile, os
+            outdir = Path(tempfile.gettempdir()) if os.path.exists(tempfile.gettempdir()) else SCRIPT_DIR
+            src_md = outdir / f"{safe}_merged.md"
+            src_md.write_text(merged, encoding="utf-8")
+            if fmt == "epub":
+                dst = outdir / f"{safe}.epub"
+                _epub_build(str(src_md), str(dst), title=name)
+            else:
+                dst = outdir / f"{safe}.txt"
+                _txt_build(str(src_md), str(dst))
+            if not dst.exists():
+                self._json({"error": "导出失败"}, 500)
+                return
+            data = dst.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/epub+zip" if fmt == "epub" else "text/plain; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{dst.name}"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        elif path == "/api/stats":
+            # D 多书成本看板 + H 写作统计：汇总所有书的 usage.jsonl → 每书成本/命中率/调用次数 + 每章趋势
+            stats = []
+            for b in list_books():
+                bid = b["id"]
+                uf = (BASE / "01_正史账本" / "usage.jsonl") if bid == "__default__" else (book_dir(bid) / "ledger" / "usage.jsonl")
+                rows = []
+                if uf.exists():
+                    for ln in uf.read_text(encoding="utf-8", errors="replace").splitlines():
+                        ln = ln.strip()
+                        if not ln:
+                            continue
+                        try:
+                            rows.append(json.loads(ln))
+                        except Exception:
+                            continue
+                cost = sum(r["usage"].get("cost", 0) for r in rows)
+                hit = sum(r["usage"].get("cache_hit", 0) for r in rows)
+                miss = sum(r["usage"].get("cache_miss", 0) for r in rows)
+                out = sum(r["usage"].get("output", 0) for r in rows)
+                tot = hit + miss
+                # H 每章趋势：正文写章记录（ch 为数字）→ 按章聚合（费用/输出/时间）
+                writes = [r for r in rows if str(r.get("ch", "")).isdigit()]
+                per_ch = {}
+                for r in writes:
+                    cn = int(r["ch"])
+                    d = per_ch.setdefault(cn, {"cost": 0.0, "out": 0, "ts": ""})
+                    d["cost"] += r["usage"].get("cost", 0)
+                    d["out"] += r["usage"].get("output", 0)
+                    if r.get("ts", "") > d["ts"]:
+                        d["ts"] = r["ts"]
+                trend = [{"ch": cn, "cost": round(d["cost"], 4), "out": d["out"], "ts": d["ts"]}
+                         for cn, d in sorted(per_ch.items())[-15:]]  # 最近15章
+                stats.append({
+                    "id": bid, "name": b["name"], "chapters": b["chapters"],
+                    "calls": len(rows), "cost": round(cost, 4),
+                    "hit": hit, "miss": miss, "output": out,
+                    "hit_rate": round(hit / tot * 100, 1) if tot else 0,
+                    "trend": trend,
+                })
+            self._json({"stats": stats})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -539,6 +643,9 @@ PAGE = r"""<!DOCTYPE html>
   <div class="row">
     <button class="sec" onclick="doPreview()">👁 预览 prompt</button>
     <button class="sec" onclick="showChaps()">📄 已写章节</button>
+    <button class="sec" onclick="doExport('txt')">📥 导出 TXT</button>
+    <button class="sec" onclick="doExport('epub')">📚 导出 EPUB</button>
+    <button class="sec" onclick="showStats()">💰 成本看板</button>
   </div>
   <div class="status" id="stWrite"></div>
   <div class="log" id="logWrite"></div>
@@ -554,7 +661,7 @@ PAGE = r"""<!DOCTYPE html>
     <input id="nbTotal" type="number" min="1" value="30" placeholder="总章数">
   </div>
   <label>阶段规划（每行一个「阶段名:起-止章」，留空=自动3阶段）</label>
-  <textarea id="nbStages" rows="3" placeholder="开端:1-10&#10;发展:11-25&#10;结局:26-30"></textarea>
+  <textarea id="nbStages" rows="3" placeholder="开端:1-10&#10;发展:11-25&#10;终局:26-30"></textarea>
   <label><input type="checkbox" id="nbAi" checked> 用 AI 生成世界观/大纲/脑洞/红线（需 Key，约1分钟）</label>
   <button class="sec" onclick="doNewBook()">🚀 创建新书</button>
   <div class="status" id="stNew"></div>
@@ -655,6 +762,41 @@ function doPreview(){
   api("/api/preview", {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({book: cur})})
     .then(d => { if(d.task) poll(d.task.id, "stWrite", "logWrite", "预览完成（下面是完整 prompt）"); });
+}
+
+async function doExport(fmt){
+  const url = "/api/export?book=" + encodeURIComponent(cur) + "&fmt=" + fmt;
+  setSt("stWrite", fmt==="epub" ? "⏳ 正在生成 EPUB…" : "⏳ 正在生成 TXT…", "run");
+  try{
+    const r = await fetch(url);
+    if(!r.ok){ const d = await r.json().catch(()=>({})); setSt("stWrite", "❌ " + (d.error||"导出失败"), "err"); return; }
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    const obj = URL.createObjectURL(blob);
+    a.href = obj; a.download = (r.headers.get("Content-Disposition")||"").match(/filename="([^"]+)"/)?.[1] || (fmt==="epub"?"novel.epub":"novel.txt");
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(obj);
+    setSt("stWrite", `✅ 已导出 ${a.download}`, "ok");
+  }catch(e){ setSt("stWrite", "❌ 导出异常: " + e, "err"); }
+}
+
+async function showStats(){
+  const d = await api("/api/stats");
+  const s = d.stats || [];
+  if(!s.length){ setSt("stWrite", "暂无统计数据", "run"); return; }
+  let out = "【💰 成本看板】\n";
+  for (const b of s){
+    out += `\n《${b.name}》 ${b.chapters}章 · ${b.calls}次调用\n`;
+    out += `   💸 ¥${b.cost.toFixed(4)} ｜ 命中率 ${b.hit_rate}%\n`;
+    out += `   缓存命中 ${(b.hit/1000).toFixed(0)}K / 未命中 ${(b.miss/1000).toFixed(0)}K / 输出 ${(b.output/1000).toFixed(0)}K\n`;
+    // H 每章趋势（最近8章）
+    if (b.trend && b.trend.length){
+      out += "   最近几章：";
+      const t8 = b.trend.slice(-8);
+      out += t8.map(x => `第${x.ch}章¥${x.cost.toFixed(3)}`).join(" → ");
+      out += "\n";
+    }
+  }
+  setSt("stWrite", out, "ok");
 }
 
 async function showChaps(){

@@ -174,6 +174,27 @@ def next_chapter_no():
     return (max(c for c, _ in chs) + 1) if chs else 1
 
 
+def planned_total():
+    """规划总章数：取 STAGE_ANCHORS 里最大的 ch_hi；无配置返回 None"""
+    try:
+        anchors = m.STAGE_ANCHORS
+        if anchors:
+            return max(r[4] for r in anchors)
+    except Exception:
+        pass
+    return None
+
+
+def completion_status():
+    """完本状态：返回 (is_complete, total, next_no, extra_planned)"""
+    total = planned_total()
+    if total is None:
+        return False, None, next_chapter_no(), 0
+    nxt = next_chapter_no()
+    extra = max(0, nxt - 1 - total)
+    return (nxt - 1 >= total), total, nxt, extra
+
+
 def progress_line():
     """傻瓜模式的进度一行：已发布N章 ｜ 当前时代 ｜ 下一章"""
     chs = list_chapters()
@@ -717,6 +738,8 @@ async def main():
     ap.add_argument("--start", type=int, default=None, help="起始章号（默认=已发布+1）")
     ap.add_argument("--no-review", action="store_true", help="关闭 A1 章节评审闭环（省评审费）")
     ap.add_argument("--polish", action="store_true", help="B2 草稿-润色：flash 草稿 → pro 润色（提升文字质感，成本约翻倍）")
+    ap.add_argument("--continue", dest="continue_writing", action="store_true",
+                    help="完本后显式续写（番外/第二部；否则到达规划章数即停）")
     args = ap.parse_args()
 
     # ============ 傻瓜模式：无任何参数 → 交互问答 ============
@@ -767,6 +790,15 @@ async def main():
             sys.exit(1)
 
     start = args.start or next_chapter_no()
+    # A 完本纪律：已写到规划章数 → 默认停，需 --continue 才续写（番外/第二部）
+    is_complete, total, nxt, extra = completion_status()
+    if total is not None and not args.continue_writing and is_complete:
+        print(f"\n⚠️ 本书已完结：规划 {total} 章，已发布 {nxt - 1} 章"
+              f"（{'超' if extra > 0 else ''}{extra}章" if extra else "")
+        print("   📕 想续写番外/第二部？加 --continue 显式声明（引擎会按「番外/续写」模式继续）")
+        print("   📗 想新开一本？用 python3 new_novel.py")
+        print("   直接写：--write N --continue")
+        sys.exit(0)
     ok_cnt = 0
     for i in range(args.write):
         ch_no = start + i
