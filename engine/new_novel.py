@@ -212,17 +212,30 @@ def gen_config_files(book_dir: Path, name: str, protagonist: str, stages: list):
 
 # ================= AI 辅助生成 =================
 
-async def ai_generate_files(book_dir: Path, name: str, intro: str, protagonist: str, stages: list, key: str):
-    """用 DeepSeek 并行生成 6 个设定文件；单文件失败 → 保留模板占位，不阻塞建书。"""
+async def ai_generate_files(book_dir: Path, name: str, intro: str, protagonist: str, stages: list, key: str,
+                          theme: str = "", style: str = "", ideas: str = ""):
+    """用 DeepSeek 并行生成 6 个设定文件；单文件失败 → 保留模板占位，不阻塞建书。
+
+    theme/style/ideas：作者自定义（主题/风格/想塞的脑洞），AI 必须基于它们扩充，禁止另起一套。
+    """
     from mediakit.llm import LLMClient
     from mediakit.config import QWEN_PERSONA, DEEPSEEK_PRICE
 
     stage_brief = "\n".join(f"- {s['name']}（第{s['ch_lo']}~{s['ch_hi']}章）：{s['desc'] or '（未填写）'}" for s in stages)
+    # 作者自定义（可空）：有就作为 AI 扩充的硬约束
+    custom_brief = ""
+    if theme.strip():
+        custom_brief += f"\n【作者定的主题/题材（必须围绕，禁止偏离）】{theme.strip()}"
+    if style.strip():
+        custom_brief += f"\n【作者定的风格/基调（写作时保持）】{style.strip()}"
+    if ideas.strip():
+        custom_brief += f"\n【作者想塞的脑洞/元素（扩充进世界观与大纲，尽量都用上）】{ideas.strip()}"
     base_ctx = (
         f"小说名：《{name}》\n"
         f"一句话简介：{intro or '（未填写，请合理构思）'}\n"
         f"主角：{protagonist or '（未指定，请起一个合适的名字与性格）'}\n"
         f"阶段规划：\n{stage_brief}\n"
+        f"{custom_brief}\n"
     )
 
     def mk_client():
@@ -230,16 +243,20 @@ async def ai_generate_files(book_dir: Path, name: str, intro: str, protagonist: 
         return LLMClient("新书设定", "qwen", "\033[95m", base_url, key,
                          "deepseek-v4-flash", QWEN_PERSONA, max_history=0)
 
-    async def gen(filename, instruction, max_tokens=6000, ctx=None):
+    async def gen(filename, instruction, max_tokens=6000, ctx=None, min_len=300):
         prompt = (ctx or base_ctx) + "\n" + instruction
         try:
             client = mk_client()
             reply = await client.chat(prompt, temperature=0.8, max_tokens=max_tokens)
-            (book_dir / "novel_config" / filename).write_text(reply.strip(), encoding="utf-8")
-            print(f"{C_G}  ✅ 已生成 {filename}（{len(reply)} 字）{C_0}")
+            text = reply.strip()
+            # 长度校验：AI 输出过短（网络中断/截断残留）→ 视为失败，保留占位模板并明确提示
+            if len(text) < min_len:
+                raise RuntimeError(f"输出过短（{len(text)} 字 < {min_len}），疑似网络中断/截断")
+            (book_dir / "novel_config" / filename).write_text(text, encoding="utf-8")
+            print(f"{C_G}  ✅ 已生成 {filename}（{len(text)} 字）{C_0}")
             return True
         except Exception as e:
-            print(f"{C_Y}  ⚠️ {filename} 生成失败（保留模板）：{str(e)[:100]}{C_0}")
+            print(f"{C_R}  ❌ {filename} 生成失败（保留占位模板，可稍后重试或手填）：{str(e)[:100]}{C_0}")
             return False
 
     # 两阶段建书：先 world_setting 打底（世界观底座），其余文件基于它生成，杜绝并行各写各的世界观分裂。
@@ -297,10 +314,18 @@ async def ai_generate_files(book_dir: Path, name: str, intro: str, protagonist: 
             ctx=ws_ctx),
     ]
     results = await asyncio.gather(*tasks)
-    return sum(1 for r in results if r)
+    ok_n = sum(1 for r in results if r)
+    if ok_n < len(results):
+        failed = [f for f, r in zip(
+            ["topic.md", "world_idea.md", "redline_table.md", "outline.md", "checklist.md", "chapter_events.md"],
+            results) if not r]
+        print(f"\n{C_R}⚠️ 有 {len(failed)} 个文件 AI 生成失败（保留占位模板）：{'、'.join(failed)}{C_0}")
+        print(f"{C_Y}   → 下次联网稳定后，可手动编辑 novel_config/ 下这些文件，或删除后用向导重建。{C_0}")
+    return ok_n
 
 
-def create_book(name: str, intro: str, protagonist: str, stages: list, use_ai: bool, key: str):
+def create_book(name: str, intro: str, protagonist: str, stages: list, use_ai: bool, key: str,
+               theme: str = "", style: str = "", ideas: str = ""):
     """建书主体：生成目录骨架 + 全部配置文件。返回新书目录。"""
     safe = re.sub(r'[\\/:*?"<>|\s]+', "_", name).strip() or "我的新书"
     book_dir = BOOKS_DIR / safe
@@ -333,8 +358,12 @@ def create_book(name: str, intro: str, protagonist: str, stages: list, use_ai: b
             print(f"{C_Y}⚠️ 无 API Key，跳过 AI 生成，可稍后手动填模板。{C_0}")
         else:
             print(f"{C_B}🤖 AI 辅助生成设定中（6 个文件并行，约 0.5~2 分钟）…{C_0}")
-            ok = asyncio.run(ai_generate_files(book_dir, name, intro, protagonist, stages, key))
+            ok = asyncio.run(ai_generate_files(book_dir, name, intro, protagonist, stages, key,
+                                              theme, style, ideas))
             print(f"{C_G}  ✅ AI 生成完成：{ok}/6 个文件{C_0}")
+            if ok < 6:
+                print(f"{C_R}  ⚠️ 部分文件未生成（网络中断等），已保留占位模板。写章前请检查：{C_0}")
+                print(f"{C_Y}     ls '{book_dir}/novel_config/'  → 看哪个 .md 很小（<300字）就是占位，需补填。{C_0}")
 
     # 新书 README（使用指引）
     (book_dir / "README.md").write_text(
@@ -378,6 +407,11 @@ def main():
     protagonist = args.protagonist or ask("👤 主角名（可选）", "")
     total = int(ask("📐 预计总章数", "30")) or 30
 
+    # ---- 作者自定义（主题/风格/脑洞，AI 基于此扩充；空=让 AI 自由发挥）----
+    theme = ask("🎯 主题/题材（如：反乌托邦/克苏鲁/星际殖民/时间循环…可写自己想法，回车跳过）", "")
+    style = ask("🎨 风格/基调（如：冷幽默/沉重史诗/轻快日常/硬核写实…回车跳过）", "")
+    ideas = ask("💡 想塞的脑洞/元素（如：会说话的猫/古罗马遗迹/记忆交易…逗号分隔，回车跳过）", "")
+
     # ---- 阶段规划 ----
     stages = ask_stage_plan(total)
 
@@ -389,7 +423,7 @@ def main():
     key = load_key(args.key) if use_ai else ""
 
     # ---- 建书 ----
-    book_dir = create_book(name, intro, protagonist, stages, use_ai, key)
+    book_dir = create_book(name, intro, protagonist, stages, use_ai, key, theme, style, ideas)
     if not book_dir:
         print("已取消。")
         return

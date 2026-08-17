@@ -263,7 +263,8 @@ def start_preview(bid):
 
 
 # ================= 建新书 =================
-def start_newbook(name, intro, protagonist, total, use_ai, key, stages=None):
+def start_newbook(name, intro, protagonist, total, use_ai, key, stages=None,
+                  theme="", style="", ideas=""):
     t = new_task("newbook", f"建新书《{name}》")
     total_n = max(int(total), 1)
     if stages:
@@ -291,7 +292,8 @@ def start_newbook(name, intro, protagonist, total, use_ai, key, stages=None):
     def _fn():
         sys.path.insert(0, str(SCRIPT_DIR))
         import new_novel
-        new_novel.create_book(name, intro, protagonist, stages, use_ai, key)
+        new_novel.create_book(name, intro, protagonist, stages, use_ai, key,
+                              theme, style, ideas)
     run_in_thread(t.id, _fn)
     return t
 
@@ -539,7 +541,10 @@ class Handler(BaseHTTPRequestHandler):
             t = start_newbook(name,
                               body.get("intro", "").strip(),
                               body.get("protagonist", "").strip(),
-                              total, use_ai, key, stages=stages)
+                              total, use_ai, key, stages=stages,
+                              theme=body.get("theme", "").strip(),
+                              style=body.get("style", "").strip(),
+                              ideas=body.get("ideas", "").strip())
             self._json({"task": t.to_dict()})
         elif path == "/api/savekey":
             key = body.get("key", "").strip()
@@ -665,6 +670,12 @@ PAGE = r"""<!DOCTYPE html>
   <div class="row">
     <input id="nbTotal" type="number" min="1" value="30" placeholder="总章数">
   </div>
+  <label>🎯 主题/题材（AI 会围绕它扩充，可写自己的想法）</label>
+  <input id="nbTheme" placeholder="如：反乌托邦 / 克苏鲁 / 星际殖民 / 时间循环…（可选）">
+  <label>🎨 风格/基调（AI 写章时保持）</label>
+  <input id="nbStyle" placeholder="如：冷幽默 / 沉重史诗 / 轻快日常 / 硬核写实…（可选）">
+  <label>💡 想塞的脑洞/元素（逗号分隔，AI 尽量都用上）</label>
+  <textarea id="nbIdeas" rows="2" placeholder="如：会说话的猫, 古罗马遗迹, 记忆交易…（可选）"></textarea>
   <label>阶段规划（每行一个「阶段名:起-止章」，留空=自动3阶段）</label>
   <textarea id="nbStages" rows="3" placeholder="开端:1-10&#10;发展:11-25&#10;结局:26-30"></textarea>
   <label><input type="checkbox" id="nbAi" checked> 用 AI 生成世界观/大纲/脑洞/红线（需 Key，约1分钟）</label>
@@ -828,6 +839,8 @@ function doNewBook(){
   api("/api/newbook", {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({name, intro:$("nbIntro").value.trim(),
         protagonist:$("nbProt").value.trim(), total:parseInt($("nbTotal").value)||30,
+        theme:$("nbTheme").value.trim(), style:$("nbStyle").value.trim(),
+        ideas:$("nbIdeas").value.trim(),
         stages:$("nbStages").value.trim() || undefined,
         ai:$("nbAi").checked, key:$("keyInput").value || undefined})})
     .then(d => {
