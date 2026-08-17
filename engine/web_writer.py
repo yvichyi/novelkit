@@ -217,6 +217,52 @@ def save_engine(bid, data):
     tmp.replace(p)
 
 
+def load_stages(bid):
+    """读取当前书阶段规划：anchors.json 的 STAGE_ANCHORS + STAGE_DIMS（描述）。"""
+    d = book_dir(bid)
+    p = d / "novel_config" / "anchors.json"
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    anchors = data.get("STAGE_ANCHORS", [])
+    dims = data.get("STAGE_DIMS", {})
+    out = []
+    for a in anchors:
+        name = a[0]
+        out.append({"name": name,
+                    "ch_lo": int(a[3]), "ch_hi": int(a[4]),
+                    "desc": (dims.get(name, {}) or {}).get("阶段目标", "")})
+    return out
+
+
+def save_stages(bid, stages):
+    """写回 anchors.json：更新 STAGE_ANCHORS（起止章/顺序）与 STAGE_DIMS（阶段目标描述）。"""
+    d = book_dir(bid)
+    p = d / "novel_config" / "anchors.json"
+    data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    new_anchors, new_dims = [], {}
+    for i, s in enumerate(stages, 1):
+        lo, hi = max(int(s.get("ch_lo", 1)), 1), max(int(s.get("ch_hi", 1)), 1)
+        if lo > hi:
+            lo, hi = hi, lo
+        name = (s.get("name") or f"阶段{i}").strip()
+        desc = (s.get("desc") or "").strip()
+        new_anchors.append([name, i, i, lo, hi])
+        # 保留原评分维度，只更新阶段目标
+        old_dims = data.get("STAGE_DIMS", {}).get(name, {}) or {}
+        dims = dict(old_dims)
+        dims["阶段目标"] = f"本阶段（{name}）核心：{desc}" if desc else ""
+        new_dims[name] = dims
+    data["STAGE_ANCHORS"] = new_anchors
+    data["STAGE_DIMS"] = new_dims
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(p)
+
+
 def local_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -366,6 +412,9 @@ class Handler(BaseHTTPRequestHandler):
                                                "reasoning_effort": "medium"},
                                      "review": {"max_tokens": 1200, "thinking": "disabled"},
                                      "polish": {"max_tokens": 12000, "thinking": "disabled"}}})
+        elif path == "/api/stages":
+            bid = q.get("book", ["__default__"])[0]
+            self._json({"book": bid, "stages": load_stages(bid)})
         elif path == "/api/export":
             # B 导出：?book=X&fmt=txt|epub → 合并章节 → 生成文件 → 直接下载
             bid = q.get("book", ["__default__"])[0]
@@ -521,23 +570,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "AI 生成设定需要 API Key，请先在「设置」里填 Key"}, 400)
             total = max(int(body.get("total", 30)), 1)
             stages = None
-            raw = body.get("stages")  # 格式："阶段名:起-止" 每行一个，如 "开端:1-10"
+            raw = body.get("stages")  # 每行一个，兼容 "开端:1-10" 和 "开端:1-10:描写重点" 和 "开端 (1-10)：描写重点"
             if raw:
                 stages = []
                 for ln in str(raw).splitlines():
                     ln = ln.strip()
                     if not ln:
                         continue
-                    if ":" in ln:
-                        nm, rng = ln.split(":", 1)
-                    else:
-                        nm, rng = f"阶段{len(stages)+1}", ln
-                    nm = nm.strip() or f"阶段{len(stages)+1}"
-                    rng = rng.strip().replace("第", "").replace("章", "").replace("～", "-").replace("~", "-").replace("—", "-")
-                    parts = [p for p in rng.split("-") if p.strip().isdigit()]
-                    if len(parts) < 2:
-                        self._json({"error": f"阶段「{ln}」格式不对，示例：开端:1-10"}, 400)
-                    stages.append({"name": nm, "ch_lo": int(parts[0]), "ch_hi": int(parts[1]), "desc": ""})
+                    m = re.search(r"(\d+)\s*[-~～—至]\s*(\d+)", ln)
+                    if not m:
+                        self._json({"error": f"阶段「{ln}」格式不对，示例：开端:1-10:描写重点"}, 400)
+                    lo, hi = int(m.group(1)), int(m.group(2))
+                    pre = re.sub(r"[（(]?\s*\d+\s*[-~～—至]\s*\d+\s*[)）]?", "", ln[:m.start()])
+                    nm = pre.replace("(", "").replace(")", "").replace("（", "").replace("）", "").rstrip("：: \t").strip() or f"阶段{len(stages)+1}"
+                    desc = ln[m.end():].lstrip("：: \t()（）").strip()
+                    stages.append({"name": nm, "ch_lo": lo, "ch_hi": hi, "desc": desc})
             t = start_newbook(name,
                               body.get("intro", "").strip(),
                               body.get("protagonist", "").strip(),
@@ -560,6 +607,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "参数格式不对（需要 engine.write 对象）"}, 400)
             save_engine(bid, data)
             self._json({"ok": True, "saved": data})
+        elif path == "/api/stages":
+            bid = body.get("book", "__default__")
+            stages = body.get("stages")
+            if not isinstance(stages, list) or not stages:
+                self._json({"error": "stages 需要非空列表"}, 400)
+            save_stages(bid, stages)
+            self._json({"ok": True, "saved": stages})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -676,8 +730,8 @@ PAGE = r"""<!DOCTYPE html>
   <input id="nbStyle" placeholder="如：冷幽默 / 沉重史诗 / 轻快日常 / 硬核写实…（可选）">
   <label>💡 想塞的脑洞/元素（逗号分隔，AI 尽量都用上）</label>
   <textarea id="nbIdeas" rows="2" placeholder="如：会说话的猫, 古罗马遗迹, 记忆交易…（可选）"></textarea>
-  <label>阶段规划（每行一个「阶段名:起-止章」，留空=自动3阶段）</label>
-  <textarea id="nbStages" rows="3" placeholder="开端:1-10&#10;发展:11-25&#10;结局:26-30"></textarea>
+  <label>阶段规划（每行一个「阶段名:起-止章:这个阶段写什么」，留空=自动3阶段）</label>
+  <textarea id="nbStages" rows="4" placeholder="开端:1-10:重点描写违和感，比如主角发现奶龙的笑容僵硬得像贴图&#10;发展:11-25:世界观崩塌，揭示奶龙背后的真相，越挣扎越荒谬&#10;结局:26-30:不要大团圆，结局无解，主角也被同化成另一个笑着的奶龙"></textarea>
   <label><input type="checkbox" id="nbAi" checked> 用 AI 生成世界观/大纲/脑洞/红线（需 Key，约1分钟）</label>
   <button class="sec" onclick="doNewBook()">🚀 创建新书</button>
   <div class="status" id="stNew"></div>
@@ -707,6 +761,13 @@ PAGE = r"""<!DOCTYPE html>
   <input id="egMax" type="number" min="1000" step="500" placeholder="12000">
   <button class="sec" onclick="saveEngine()">💾 保存引擎参数</button>
   <div class="status" id="stEg"></div>
+  <hr style="border:0;border-top:1px solid var(--line);margin:12px 0;">
+  <div class="sub" style="text-align:left;font-size:13px;color:var(--sub);">📐 阶段规划（当前书 · 每阶段「阶段名:起-止:描写重点」一行）</div>
+  <textarea id="stgInput" rows="5" placeholder="开端:1-10:重点描写违和感，笑容僵硬得像贴图&#10;发展:11-25:世界观崩塌，越挣扎越荒谬&#10;结局:26-30:不要大团圆，主角被同化成另一个笑着的奶龙" style="font-family:monospace"></textarea>
+  <div class="status" id="stStg"></div>
+  <button class="sec" onclick="loadStages()">🔄 重新载入阶段</button>
+  <button class="sec" onclick="saveStages()">💾 保存阶段规划</button>
+  <div class="status" id="stStgMsg"></div>
 </div>
 
 <footer>写作台 · 同 Wi-Fi 的家人朋友也能连 · 关掉本页 = 停止服务</footer>
@@ -734,7 +795,7 @@ async function refreshBooks(){
     const div = document.createElement("div");
     div.className = "bookbtn" + (b.id===cur ? " sel" : "");
     div.innerHTML = `<div><strong>${esc(b.name)}</strong><br><small>已写 ${b.chapters} 章 · 下一章 第${b.next_no}章</small></div>`;
-    div.onclick = () => { cur = b.id; refreshBooks(); loadEngine(); };
+    div.onclick = () => { cur = b.id; refreshBooks(); loadEngine(); loadStages(); };
     el.appendChild(div);
   }
   $("addr").textContent = "局域网地址：http://" + (d.ip||"") + ":" + location.port + "  ·  家人手机同 Wi-Fi 可连";
@@ -882,6 +943,49 @@ async function saveEngine(){
       body: JSON.stringify({book: cur, engine: data})});
   if(d.ok){ setSt("stEg", "✅ 已保存，写下一章即生效", "ok"); }
   else setSt("stEg", "⚠️ " + (d.error||"保存失败"), "err");
+
+
+async function loadStages(){
+  setSt("stStg", "⏳ 载入…", "run");
+  const d = await api("/api/stages?book=" + encodeURIComponent(cur));
+  if(d.stages){
+    const lines = d.stages.map(s =>
+      `${s.name}:${s.ch_lo}-${s.ch_hi}:${s.desc}`).join("\n");
+    $("stgInput").value = lines;
+    setSt("stStg", "✅ 已载入 " + d.stages.length + " 个阶段，可编辑", "ok");
+  } else {
+    setSt("stStg", "⚠️ " + (d.error||"载入失败"), "err");
+  }
+}
+
+async function saveStages(){
+  const raw = $("stgInput").value.trim();
+  if(!raw){ setSt("stStgMsg", "⚠️ 先填阶段规划", "err"); return; }
+  // 解析每行「阶段名:起-止:描述」（兼容括号格式），构造 [{name, ch_lo, ch_hi, desc}]
+  const stages = [];
+  const lines = raw.split("\n");
+  for(const ln of lines){
+    const s = ln.trim();
+    if(!s) continue;
+    const m = s.match(/(\d+)\s*[-~～—至]\s*(\d+)/);
+    if(!m){ setSt("stStgMsg", "⚠️ 第「" + s + "」行格式不对，示例：开端:1-10:描写", "err"); return; }
+    const lo = parseInt(m[1]), hi = parseInt(m[2]);
+    let pre = s.slice(0, m.index).replace(/[（(]?\s*\d+\s*[-~～—至]\s*\d+\s*[)）]?/, "");
+    pre = pre.replace(/[（）()]/g, "").replace(/[：:]+\s*$/, "").trim();
+    const name = pre || ("阶段" + (stages.length + 1));
+    let desc = s.slice(m.index + m[0].length).replace(/^[：:\s（）()]+/, "").trim();
+    stages.push({name, ch_lo: lo, ch_hi: hi, desc});
+  }
+  if(!stages.length){ setSt("stStgMsg", "⚠️ 没有有效行", "err"); return; }
+  setSt("stStgMsg", "⏳ 保存中…", "run");
+  const d = await api("/api/stages", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({book: cur, stages})});
+  if(d.ok){
+    setSt("stStgMsg", "✅ 已保存 " + stages.length + " 个阶段，写章即生效", "ok");
+    $("stgInput").value = stages.map(s => `${s.name}:${s.ch_lo}-${s.ch_hi}:${s.desc}`).join("\n");
+  }
+  else setSt("stStgMsg", "⚠️ " + (d.error||"保存失败"), "err");
+}
 }
 
 refreshBooks();
