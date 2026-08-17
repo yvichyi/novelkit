@@ -731,7 +731,7 @@ PAGE = r"""<!DOCTYPE html>
   <label>💡 想塞的脑洞/元素（逗号分隔，AI 尽量都用上）</label>
   <textarea id="nbIdeas" rows="2" placeholder="如：会说话的猫, 古罗马遗迹, 记忆交易…（可选）"></textarea>
   <label>阶段规划（每行一个「阶段名:起-止章:这个阶段写什么」，留空=自动3阶段）</label>
-  <textarea id="nbStages" rows="4" placeholder="开端:1-10:重点描写违和感，比如主角发现奶龙的笑容僵硬得像贴图&#10;发展:11-25:世界观崩塌，揭示奶龙背后的真相，越挣扎越荒谬&#10;结局:26-30:不要大团圆，结局无解，主角也被同化成另一个笑着的奶龙"></textarea>
+  <textarea id="nbStages" rows="4" placeholder="开端:1-10:重点描写违和感，比如主角发现小镇处处透着不对劲&#10;发展:11-25:世界观崩塌，揭示小镇背后的真相，越挣扎越荒谬&#10;结局:26-30:不要大团圆，结局无解，主角最终也被同化成小镇的一部分"></textarea>
   <label><input type="checkbox" id="nbAi" checked> 用 AI 生成世界观/大纲/脑洞/红线（需 Key，约1分钟）</label>
   <button class="sec" onclick="doNewBook()">🚀 创建新书</button>
   <div class="status" id="stNew"></div>
@@ -763,7 +763,7 @@ PAGE = r"""<!DOCTYPE html>
   <div class="status" id="stEg"></div>
   <hr style="border:0;border-top:1px solid var(--line);margin:12px 0;">
   <div class="sub" style="text-align:left;font-size:13px;color:var(--sub);">📐 阶段规划（当前书 · 每阶段「阶段名:起-止:描写重点」一行）</div>
-  <textarea id="stgInput" rows="5" placeholder="开端:1-10:重点描写违和感，笑容僵硬得像贴图&#10;发展:11-25:世界观崩塌，越挣扎越荒谬&#10;结局:26-30:不要大团圆，主角被同化成另一个笑着的奶龙" style="font-family:monospace"></textarea>
+  <textarea id="stgInput" rows="5" placeholder="开端:1-10:重点描写违和感，主角发现小镇处处透着不对劲&#10;发展:11-25:世界观崩塌，越挣扎越荒谬&#10;结局:26-30:不要大团圆，主角最终也被同化成小镇的一部分" style="font-family:monospace"></textarea>
   <div class="status" id="stStg"></div>
   <button class="sec" onclick="loadStages()">🔄 重新载入阶段</button>
   <button class="sec" onclick="saveStages()">💾 保存阶段规划</button>
