@@ -415,7 +415,7 @@ class Handler(BaseHTTPRequestHandler):
                         t = "## " + t
                     parts.append(t)
             merged = "\n\n".join(parts)
-            name = "介质" if bid == "__default__" else bid
+            name = "默认书" if bid == "__default__" else bid
             safe = re.sub(r'[\\/:*?"<>|\s]+', "_", name) or "novel"
             import tempfile, os
             outdir = Path(tempfile.gettempdir()) if os.path.exists(tempfile.gettempdir()) else SCRIPT_DIR
