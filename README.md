@@ -93,7 +93,7 @@ books/我的小说/
 │   ├── topic.md           ← 完整世界观
 │   ├── world_setting.md   ← 世界观精简版（注入每章 prompt 最前）
 │   ├── world_idea.md      ← 脑洞库（每章「哇点」原料）
-│   ├── redline_table.md   ← 红线对照表
+│   ├── redlines.json      ← 红线 / 风格 / 术语规则（事实源）
 │   ├── outline.md         ← 故事大纲（分层注入，防剧透+省token）
 │   ├── checklist.md       ← 设定一致性清单
 │   ├── anchors.json       ← 阶段/锚点/评分维度/黑名单
@@ -122,7 +122,9 @@ engine/
 ├── web_writer.py         # 网页写作台（零依赖 http.server，局域网可连）
 ├── start.sh              # 手机 Termux 一键菜单
 ├── ai_bridge_api.py      # 兼容层（re-export）
-└── mediakit/             # 核心包
+├── continuity_cli.py     # 长期 Agent 状态层 CLI（实验）
+├── continuity/           # 模型无关的长期状态 / 证据 / 账本
+└── mediakit/             # 小说写作核心包
     ├── config.py         # 书配置加载器（NOVEL_CONFIG_DIR）
     ├── cards.py          # 提示词卡片（时间/人物/大纲/评分/few-shot）
     ├── foreshadow.py     # 伏笔账本解析器（主线TOP3/支线冷冻/锚点应收网）
@@ -132,6 +134,45 @@ engine/
 ```
 
 **缓存原理**：每章 prompt = `[固定前缀：人格→世界观→脑洞→红线→硬规则→前文] + [动态层：时间→人物→大纲→评分→状态→整改→任务]`。前缀稳定 → DeepSeek 前缀缓存命中 → 连写越省。
+
+---
+
+## 🧭 实验层：Continuity
+
+NovelKit 最有价值的部分不只在“写小说”，而在它对**长期状态、硬约束、阶段目标、未兑现承诺和验收证据**的纪律。这个分支把这些机制抽成了一个模型无关的长期 Agent 状态层：`engine/continuity/`。
+
+```text
+Agent / Model
+     ↓
+Continuity context pack
+     ↓
+objective · constraints · milestones · commitments · questions
+     ↓
+bounded step
+     ↓
+verified evidence gate
+     ↓
+append-only ledger → next context pack
+```
+
+它不会调用模型，也不会替代工作流引擎。它只负责让一个跨很多轮运行的 Agent 不忘记“目标是什么、承诺了什么、什么证据才算完成”。
+
+```bash
+cd engine
+
+# 通用任务
+python continuity_cli.py init ./demo \
+  --title "Ship parser" \
+  --objective "实现并验证一个向后兼容的 parser"
+
+# 把一本现有 NovelKit 书映射成通用长期状态
+python continuity_cli.py novelkit-bootstrap /path/to/book
+
+python continuity_cli.py context ./demo
+python continuity_cli.py verify ./demo
+```
+
+完整设计、证据门禁与边界说明见 [docs/CONTINUITY_RUNTIME.md](docs/CONTINUITY_RUNTIME.md)。现有 NovelKit 写作引擎不依赖 Continuity，删掉这一层也不会影响原有写作流程。
 
 ---
 
@@ -150,6 +191,7 @@ engine/
 - [x] 网页写作台（局域网 + 阶段规划可视化编辑 + 导出 TXT/EPUB）
 - [x] 引擎参数可调（思考开关/强度/token 上限，每本书独立）
 - [x] 伏笔分级管控（主线TOP3/支线冷冻/锚点应收网）
+- [x] Continuity 实验层（长期目标 / 约束 / 承诺 / 证据门禁 / 账本）
 - [ ] 更多模型支持（本地 Ollama / 其他 API）
 - [ ] 多语言（当前中文优先）
 
