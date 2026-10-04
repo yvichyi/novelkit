@@ -105,6 +105,19 @@ def validate_state(state: dict[str, object]) -> list[str]:
     if len(active) > 1:
         problems.append("more than one milestone is active")
 
+    for constraint in state.get("constraints", []):
+        if isinstance(constraint, dict) and constraint.get("status") not in {
+            "active", "retired",
+        }:
+            problems.append(
+                f"constraint has invalid status: {constraint.get('id')}"
+            )
+    for fact in state.get("facts", []):
+        if isinstance(fact, dict) and fact.get("status", "active") not in {
+            "active", "superseded",
+        }:
+            problems.append(f"fact has invalid status: {fact.get('id')}")
+
     step = state.get("current_step")
     if step is not None and not isinstance(step, dict):
         problems.append("current_step must be null or an object")
@@ -194,6 +207,8 @@ class Continuity:
             "source": source,
             "status": "active",
             "created_at": _now(),
+            "retired_at": None,
+            "retirement_reason": None,
         }
         if not item["text"]:
             raise ValueError("constraint text cannot be empty")
@@ -203,6 +218,28 @@ class Continuity:
 
         self._mutate("constraint_added", {"constraint": item}, change)
         return copy.deepcopy(item)
+
+    def retire_constraint(self, constraint_id: str, reason: str) -> None:
+        reason = reason.strip()
+        if not reason:
+            raise ValueError("constraint retirement reason cannot be empty")
+
+        def change(state: dict[str, object]) -> None:
+            for item in state["constraints"]:  # type: ignore[union-attr]
+                if item["id"] == constraint_id:
+                    if item.get("status") != "active":
+                        raise ContinuityError("constraint is not active")
+                    item["status"] = "retired"
+                    item["retired_at"] = _now()
+                    item["retirement_reason"] = reason
+                    return
+            raise ContinuityError(f"unknown constraint: {constraint_id}")
+
+        self._mutate(
+            "constraint_retired",
+            {"constraint_id": constraint_id, "reason": reason},
+            change,
+        )
 
     def add_milestone(
         self,
@@ -361,6 +398,48 @@ class Continuity:
         self._mutate("resource_added", {"resource": item}, change)
         return copy.deepcopy(item)
 
+    def add_fact(
+        self,
+        statement: str,
+        source: str = "human",
+        supersedes: str | None = None,
+    ) -> dict[str, object]:
+        statement = statement.strip()
+        if not statement:
+            raise ValueError("fact statement cannot be empty")
+        item = {
+            "id": _id("fact"),
+            "statement": statement,
+            "source": source.strip() or "human",
+            "source_step": None,
+            "status": "active",
+            "supersedes": supersedes,
+            "created_at": _now(),
+            "superseded_at": None,
+            "superseded_by": None,
+        }
+
+        def change(state: dict[str, object]) -> None:
+            if supersedes:
+                for old in state["facts"]:  # type: ignore[union-attr]
+                    if old["id"] == supersedes:
+                        if old.get("status", "active") != "active":
+                            raise ContinuityError("superseded fact is not active")
+                        old["status"] = "superseded"
+                        old["superseded_at"] = _now()
+                        old["superseded_by"] = item["id"]
+                        break
+                else:
+                    raise ContinuityError(f"unknown fact: {supersedes}")
+            state["facts"].append(item)  # type: ignore[union-attr]
+
+        self._mutate(
+            "fact_added",
+            {"fact": item, "supersedes": supersedes},
+            change,
+        )
+        return copy.deepcopy(item)
+
     def begin_step(
         self,
         objective: str,
@@ -510,8 +589,13 @@ class Continuity:
                 state["facts"].append({  # type: ignore[union-attr]
                     "id": _id("fact"),
                     "statement": statement,
+                    "source": "step_learning",
                     "source_step": step_id,
+                    "status": "active",
+                    "supersedes": None,
                     "created_at": _now(),
+                    "superseded_at": None,
+                    "superseded_by": None,
                 })
             if milestone_done and active.get("milestone_id"):
                 for milestone in state["milestones"]:  # type: ignore[union-attr]
@@ -586,7 +670,14 @@ class Continuity:
                 x for x in state["questions"]  # type: ignore[index]
                 if x["status"] == "open"
             ],
-            "known_facts": ([] if fact_limit <= 0 else state["facts"][-fact_limit:]),  # type: ignore[index]
+            "known_facts": (
+                []
+                if fact_limit <= 0
+                else [
+                    x for x in state["facts"]  # type: ignore[index]
+                    if x.get("status", "active") == "active"
+                ][-fact_limit:]
+            ),
             "resources": state["resources"],
             "current_step": state["current_step"],
             "recent_events": self.workspace.recent_events(recent_events),
