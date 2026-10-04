@@ -111,6 +111,14 @@ python continuity_cli.py init ./demo \
 python continuity_cli.py constraint ./demo "Never delete user-owned source."
 python continuity_cli.py milestone ./demo "Parser" \
   --criterion "Regression tests pass" --activate
+python continuity_cli.py commitment ./demo "Keep API v1 compatible"
+python continuity_cli.py question ./demo "Which schema is canonical?"
+python continuity_cli.py resource ./demo docs/schema.md --role source-of-truth
+
+# Long-lived state can be closed or advanced instead of accumulating forever:
+python continuity_cli.py commitment-close ./demo commitment_xxx
+python continuity_cli.py question-resolve ./demo question_xxx "schema/v1"
+python continuity_cli.py milestone-activate ./demo milestone_xxx
 
 python continuity_cli.py step-begin ./demo "Implement recovery" \
   --expect "Parser regression suite passes"
