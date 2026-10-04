@@ -252,6 +252,51 @@ class ContinuityTests(unittest.TestCase):
             )
             self.assertTrue(json.loads(proc.stdout)["ok"])
 
+
+    def test_cli_can_close_long_lived_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cli_path = Path(__file__).resolve().parent / "continuity_cli.py"
+
+            def run(*args: str) -> dict[str, object]:
+                proc = subprocess.run(
+                    [sys.executable, str(cli_path), *args],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                return json.loads(proc.stdout)
+
+            run(
+                "init", tmp,
+                "--title", "Lifecycle",
+                "--objective", "Exercise the complete long-lived CLI state lifecycle.",
+            )
+            milestone = run(
+                "milestone", tmp, "Second phase",
+                "--criterion", "phase check passes",
+            )
+            commitment = run("commitment", tmp, "Publish migration note.")
+            question = run("question", tmp, "Which schema is canonical?")
+            resource = run(
+                "resource", tmp, "docs/schema.md",
+                "--role", "source-of-truth",
+                "--note", "Canonical schema",
+            )
+            self.assertEqual(resource["role"], "source-of-truth")
+
+            status = run("milestone-activate", tmp, milestone["id"])
+            self.assertEqual(status["active_milestone"]["id"], milestone["id"])
+
+            status = run(
+                "commitment-close", tmp, commitment["id"], "--status", "done"
+            )
+            self.assertEqual(status["open_commitments"], 0)
+
+            status = run(
+                "question-resolve", tmp, question["id"], "schema/v1"
+            )
+            self.assertEqual(status["open_questions"], 0)
+
     def test_novelkit_adapter_maps_domain_state_without_touching_story_engine(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             book = Path(tmp)
