@@ -253,6 +253,37 @@ class ContinuityTests(unittest.TestCase):
             self.assertTrue(json.loads(proc.stdout)["ok"])
 
 
+
+    def test_constraints_can_retire_without_erasing_history(self) -> None:
+        _tmp, runtime = self.make_runtime()
+        constraint = runtime.add_constraint("Use schema v1.")
+        runtime.retire_constraint(
+            constraint["id"],
+            "Schema v2 was explicitly adopted.",
+        )
+        pack = runtime.context_pack()
+        self.assertEqual(pack["active_constraints"], [])
+        event = runtime.workspace.recent_events(1)[0]
+        self.assertEqual(event["type"], "constraint_retired")
+        self.assertEqual(event["payload"]["constraint_id"], constraint["id"])
+
+    def test_facts_can_be_superseded_without_ghost_context(self) -> None:
+        _tmp, runtime = self.make_runtime()
+        old = runtime.add_fact("The API returns XML.", source="human")
+        new = runtime.add_fact(
+            "The API returns JSON.",
+            source="human",
+            supersedes=old["id"],
+        )
+        state = runtime.state()
+        self.assertEqual(state["facts"][0]["status"], "superseded")
+        self.assertEqual(state["facts"][0]["superseded_by"], new["id"])
+        pack = runtime.context_pack()
+        self.assertEqual(
+            [fact["statement"] for fact in pack["known_facts"]],
+            ["The API returns JSON."],
+        )
+
     def test_cli_can_close_long_lived_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cli_path = Path(__file__).resolve().parent / "continuity_cli.py"
@@ -271,6 +302,17 @@ class ContinuityTests(unittest.TestCase):
                 "--title", "Lifecycle",
                 "--objective", "Exercise the complete long-lived CLI state lifecycle.",
             )
+            constraint = run(
+                "constraint", tmp, "Use schema v1.",
+                "--severity", "important",
+            )
+            old_fact = run("fact", tmp, "The endpoint is /v1.")
+            new_fact = run(
+                "fact", tmp, "The endpoint is /v2.",
+                "--supersedes", old_fact["id"],
+            )
+            self.assertEqual(new_fact["supersedes"], old_fact["id"])
+
             milestone = run(
                 "milestone", tmp, "Second phase",
                 "--criterion", "phase check passes",
@@ -283,6 +325,16 @@ class ContinuityTests(unittest.TestCase):
                 "--note", "Canonical schema",
             )
             self.assertEqual(resource["role"], "source-of-truth")
+
+            context = run(
+                "constraint-retire", tmp, constraint["id"],
+                "Schema v2 is now canonical.",
+            )
+            self.assertEqual(context["active_constraints"], [])
+            self.assertEqual(
+                [fact["statement"] for fact in context["known_facts"]],
+                ["The endpoint is /v2."],
+            )
 
             status = run("milestone-activate", tmp, milestone["id"])
             self.assertEqual(status["active_milestone"]["id"], milestone["id"])
