@@ -62,13 +62,27 @@ The chain is an integrity mechanism for accidental/casual mutation, not a crypto
 ## State primitives
 
 - **objective**: the long-horizon outcome.
-- **constraints**: blocking, important, or advisory truths that should survive every run.
+- **constraints**: blocking, important, or advisory truths that should survive every run until explicitly retired.
 - **milestones**: intermediate states with explicit completion criteria.
 - **commitments**: promises the agent must eventually close or intentionally drop.
 - **questions**: unresolved uncertainty that should not vanish from context.
-- **facts**: durable learnings accepted from completed steps.
+- **facts**: durable learnings accepted from completed steps or external sources. Facts can be superseded explicitly; old versions stay in history but leave the active context.
 - **resources**: authoritative project files or external references.
 - **current step**: one bounded action with preconditions and expected evidence.
+
+
+## Correction semantics
+
+Long-running work changes its mind. Continuity therefore avoids two dangerous patterns: silently deleting old state and endlessly injecting obsolete state.
+
+- retiring a constraint changes it from `active` to `retired`, records the reason and timestamp, and keeps the original record in the ledger;
+- superseding a fact marks the old fact `superseded`, links it to the replacement, and only the active replacement enters future context packs;
+- commitments are closed as `done` or `dropped`;
+- questions are explicitly resolved;
+- milestones transition rather than being overwritten.
+
+The current context is therefore a projection of live obligations and beliefs, while the ledger preserves how those beliefs changed.
+
 
 ## Step lifecycle
 
@@ -109,6 +123,14 @@ python continuity_cli.py init ./demo \
   --objective "Implement and verify a backwards-compatible parser"
 
 python continuity_cli.py constraint ./demo "Never delete user-owned source."
+python continuity_cli.py fact ./demo "The API endpoint is /v1"
+
+# Corrections never delete history:
+python continuity_cli.py fact ./demo "The API endpoint is /v2" \
+  --supersedes fact_xxx
+python continuity_cli.py constraint-retire ./demo constraint_xxx \
+  "The migration replaced this constraint"
+
 python continuity_cli.py milestone ./demo "Parser" \
   --criterion "Regression tests pass" --activate
 python continuity_cli.py commitment ./demo "Keep API v1 compatible"
