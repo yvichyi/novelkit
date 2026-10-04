@@ -49,13 +49,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--criterion", action="append", default=[])
     p.add_argument("--activate", action="store_true")
 
+    p = sub.add_parser("milestone-activate")
+    p.add_argument("path")
+    p.add_argument("milestone_id")
+
     p = sub.add_parser("commitment")
     p.add_argument("path")
     p.add_argument("text")
 
+    p = sub.add_parser("commitment-close")
+    p.add_argument("path")
+    p.add_argument("commitment_id")
+    p.add_argument("--status", default="done", choices=["done", "dropped"])
+
     p = sub.add_parser("question")
     p.add_argument("path")
     p.add_argument("text")
+
+    p = sub.add_parser("question-resolve")
+    p.add_argument("path")
+    p.add_argument("question_id")
+    p.add_argument("answer")
+
+    p = sub.add_parser("resource")
+    p.add_argument("path")
+    p.add_argument("resource_path")
+    p.add_argument("--role", default="reference")
+    p.add_argument("--note", default="")
 
     p = sub.add_parser("step-begin")
     p.add_argument("path")
@@ -116,10 +136,23 @@ def main(argv: list[str] | None = None) -> int:
                 _print(runtime.add_milestone(
                     args.title, args.criterion, activate=args.activate
                 ))
+            elif args.command == "milestone-activate":
+                runtime.activate_milestone(args.milestone_id)
+                _print(runtime.status())
             elif args.command == "commitment":
                 _print(runtime.add_commitment(args.text))
+            elif args.command == "commitment-close":
+                runtime.close_commitment(args.commitment_id, args.status)
+                _print(runtime.status())
             elif args.command == "question":
                 _print(runtime.add_question(args.text))
+            elif args.command == "question-resolve":
+                runtime.resolve_question(args.question_id, args.answer)
+                _print(runtime.status())
+            elif args.command == "resource":
+                _print(runtime.add_resource(
+                    args.resource_path, role=args.role, note=args.note
+                ))
             elif args.command == "step-begin":
                 _print(runtime.begin_step(
                     args.objective,
