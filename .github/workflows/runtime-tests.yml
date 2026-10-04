@@ -1,0 +1,30 @@
+name: runtime-tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile
+        run: python -m compileall -q engine
+      - name: Existing NovelKit regression suite
+        working-directory: engine
+        run: python test_engine.py
+      - name: Continuity regression suite
+        working-directory: engine
+        run: python test_continuity.py

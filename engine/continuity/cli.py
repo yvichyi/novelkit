@@ -1,0 +1,141 @@
+"""CLI for Continuity's model-agnostic long-horizon state."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+from .novelkit import bootstrap_novelkit
+from .runtime import Continuity, ContinuityError
+
+
+def _print(value: object) -> None:
+    print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="continuity",
+        description="Persistent semantic state for long-horizon agents.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("init")
+    p.add_argument("path")
+    p.add_argument("--title", required=True)
+    p.add_argument("--objective", required=True)
+    p.add_argument("--domain", default="generic")
+
+    p = sub.add_parser("status")
+    p.add_argument("path")
+
+    p = sub.add_parser("context")
+    p.add_argument("path")
+    p.add_argument("--recent", type=int, default=8)
+
+    p = sub.add_parser("verify")
+    p.add_argument("path")
+
+    p = sub.add_parser("constraint")
+    p.add_argument("path")
+    p.add_argument("text")
+    p.add_argument("--severity", default="blocking",
+                   choices=["blocking", "important", "advisory"])
+
+    p = sub.add_parser("milestone")
+    p.add_argument("path")
+    p.add_argument("title")
+    p.add_argument("--criterion", action="append", default=[])
+    p.add_argument("--activate", action="store_true")
+
+    p = sub.add_parser("commitment")
+    p.add_argument("path")
+    p.add_argument("text")
+
+    p = sub.add_parser("question")
+    p.add_argument("path")
+    p.add_argument("text")
+
+    p = sub.add_parser("step-begin")
+    p.add_argument("path")
+    p.add_argument("objective")
+    p.add_argument("--intent", default="execute")
+    p.add_argument("--milestone")
+    p.add_argument("--precondition", action="append", default=[])
+    p.add_argument("--expect", action="append", default=[])
+
+    p = sub.add_parser("step-finish")
+    p.add_argument("path")
+    p.add_argument("outcome")
+    p.add_argument("--evidence", action="append", default=[])
+    p.add_argument("--learning", action="append", default=[])
+    p.add_argument("--milestone-done", action="store_true")
+
+    p = sub.add_parser("step-fail")
+    p.add_argument("path")
+    p.add_argument("reason")
+    p.add_argument("--classification", default="execution")
+
+    p = sub.add_parser("novelkit-bootstrap")
+    p.add_argument("book_dir")
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.command == "init":
+            runtime = Continuity.create(
+                args.path, args.title, args.objective, args.domain
+            )
+            _print(runtime.status())
+        elif args.command == "novelkit-bootstrap":
+            runtime = bootstrap_novelkit(args.book_dir)
+            _print(runtime.context_pack())
+        else:
+            runtime = Continuity(args.path)
+            if args.command == "status":
+                _print(runtime.status())
+            elif args.command == "context":
+                _print(runtime.context_pack(recent_events=args.recent))
+            elif args.command == "verify":
+                _print(runtime.verify())
+            elif args.command == "constraint":
+                _print(runtime.add_constraint(args.text, args.severity))
+            elif args.command == "milestone":
+                _print(runtime.add_milestone(
+                    args.title, args.criterion, activate=args.activate
+                ))
+            elif args.command == "commitment":
+                _print(runtime.add_commitment(args.text))
+            elif args.command == "question":
+                _print(runtime.add_question(args.text))
+            elif args.command == "step-begin":
+                _print(runtime.begin_step(
+                    args.objective,
+                    intent=args.intent,
+                    milestone_id=args.milestone,
+                    preconditions=args.precondition,
+                    expected_evidence=args.expect,
+                ))
+            elif args.command == "step-finish":
+                runtime.finish_step(
+                    args.outcome,
+                    evidence=args.evidence,
+                    learnings=args.learning,
+                    milestone_done=args.milestone_done,
+                )
+                _print(runtime.status())
+            elif args.command == "step-fail":
+                runtime.fail_step(args.reason, args.classification)
+                _print(runtime.status())
+        return 0
+    except (ContinuityError, ValueError) as exc:
+        print(f"continuity: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
