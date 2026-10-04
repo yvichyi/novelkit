@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
-from .evidence import evaluate_evidence_gate, make_evidence\nfrom .store import ConflictError, ContinuityError, Workspace
+from .evidence import evaluate_evidence_gate, make_evidence
+from .store import ConflictError, ContinuityError, Workspace
 
 STATE_SCHEMA = "continuity.state/v1"
 CONTEXT_SCHEMA = "continuity.context/v1"

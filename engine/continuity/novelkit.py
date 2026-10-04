@@ -41,7 +41,8 @@ def bootstrap_novelkit(book_dir: str | Path) -> Continuity:
     resource_specs = [
         ("novel_config/world_setting.md", "world_state", "Current world-state source"),
         ("novel_config/outline.md", "plan", "Long-horizon story plan"),
-        ("novel_config/redline_table.md", "constraint_source", "Hard writing redlines"),
+        ("novel_config/redlines.json", "constraint_source", "Hard writing/style redlines"),
+        ("novel_config/redline_table.md", "constraint_source", "Optional rendered redline table"),
         ("novel_config/checklist.md", "constraint_source", "Canon consistency checklist"),
         ("ledger/章节事件表.md", "history", "Irreversible event ledger"),
         ("ledger/伏笔账本.md", "commitment_source", "Open and recovered foreshadowing"),
@@ -50,11 +51,17 @@ def bootstrap_novelkit(book_dir: str | Path) -> Continuity:
         if (root / rel).exists():
             runtime.add_resource(rel, role=role, note=note)
 
-    if (config / "redline_table.md").exists():
+    redline_sources = [
+        rel for rel in ("redlines.json", "redline_table.md")
+        if (config / rel).exists()
+    ]
+    if redline_sources:
         runtime.add_constraint(
-            "Honor every active rule in novel_config/redline_table.md.",
+            "Honor every active NovelKit redline in: "
+            + ", ".join(f"novel_config/{name}" for name in redline_sources)
+            + ".",
             severity="blocking",
-            source="NovelKit redline table",
+            source="NovelKit redline config",
         )
     if (config / "checklist.md").exists():
         runtime.add_constraint(

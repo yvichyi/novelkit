@@ -203,7 +203,7 @@ class ContinuityTests(unittest.TestCase):
             ledger.mkdir()
             published.mkdir()
             (config / "world_setting.md").write_text("world", encoding="utf-8")
-            (config / "redline_table.md").write_text("redline", encoding="utf-8")
+            (config / "redlines.json").write_text(json.dumps({"BANNED_WORDS": ["forbidden"]}), encoding="utf-8")
             (config / "checklist.md").write_text("canon", encoding="utf-8")
             (config / "anchors.json").write_text(
                 json.dumps({
