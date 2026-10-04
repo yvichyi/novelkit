@@ -43,6 +43,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--severity", default="blocking",
                    choices=["blocking", "important", "advisory"])
 
+    p = sub.add_parser("constraint-retire")
+    p.add_argument("path")
+    p.add_argument("constraint_id")
+    p.add_argument("reason")
+
+    p = sub.add_parser("fact")
+    p.add_argument("path")
+    p.add_argument("statement")
+    p.add_argument("--source", default="human")
+    p.add_argument("--supersedes")
+
     p = sub.add_parser("milestone")
     p.add_argument("path")
     p.add_argument("title")
@@ -132,6 +143,15 @@ def main(argv: list[str] | None = None) -> int:
                 _print(runtime.verify())
             elif args.command == "constraint":
                 _print(runtime.add_constraint(args.text, args.severity))
+            elif args.command == "constraint-retire":
+                runtime.retire_constraint(args.constraint_id, args.reason)
+                _print(runtime.context_pack())
+            elif args.command == "fact":
+                _print(runtime.add_fact(
+                    args.statement,
+                    source=args.source,
+                    supersedes=args.supersedes,
+                ))
             elif args.command == "milestone":
                 _print(runtime.add_milestone(
                     args.title, args.criterion, activate=args.activate
