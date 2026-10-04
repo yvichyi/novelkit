@@ -222,6 +222,10 @@ class Continuity:
             raise ValueError("milestone title cannot be empty")
 
         def change(state: dict[str, object]) -> None:
+            if activate and state["current_step"] is not None:
+                raise ContinuityError(
+                    "cannot switch active milestone while a step is running"
+                )
             milestones = state["milestones"]  # type: ignore[assignment]
             if activate:
                 for milestone in milestones:
@@ -234,6 +238,16 @@ class Continuity:
 
     def activate_milestone(self, milestone_id: str) -> None:
         def change(state: dict[str, object]) -> None:
+            step = state.get("current_step")
+            if (
+                isinstance(step, dict)
+                and step.get("milestone_id")
+                and step.get("milestone_id") != milestone_id
+            ):
+                raise ContinuityError(
+                    "cannot switch milestones while a step is attached "
+                    "to another milestone"
+                )
             found = False
             for milestone in state["milestones"]:  # type: ignore[union-attr]
                 if milestone["id"] == milestone_id:
@@ -359,11 +373,19 @@ class Continuity:
         if current["current_step"] is not None:
             raise ContinuityError("another step is already active")
         if milestone_id:
-            known = {
-                m["id"] for m in current["milestones"]  # type: ignore[index]
-            }
-            if milestone_id not in known:
+            matched = next(
+                (
+                    m for m in current["milestones"]  # type: ignore[index]
+                    if m["id"] == milestone_id
+                ),
+                None,
+            )
+            if matched is None:
                 raise ContinuityError(f"unknown milestone: {milestone_id}")
+            if matched["status"] != "active":
+                raise ContinuityError(
+                    "a step can only attach to the active milestone"
+                )
 
         context = self.context_pack()
         item = {
@@ -449,6 +471,34 @@ class Continuity:
                 f"(missing: {missing}; failed: {failed})"
             )
 
+        milestone_gate: dict[str, object] | None = None
+        if milestone_done:
+            milestone_id = step.get("milestone_id")
+            if not milestone_id:
+                raise ContinuityError(
+                    "cannot complete a milestone from an unbound step"
+                )
+            milestone = next(
+                (
+                    m for m in current["milestones"]  # type: ignore[index]
+                    if m["id"] == milestone_id
+                ),
+                None,
+            )
+            if not isinstance(milestone, dict):
+                raise ContinuityError("step milestone no longer exists")
+            milestone_gate = evaluate_evidence_gate(
+                milestone.get("criteria", []),
+                step.get("evidence", []),
+            )
+            if not milestone_gate["passed"] and not override:
+                missing = ", ".join(milestone_gate["missing"]) or "none"
+                failed = ", ".join(milestone_gate["failed"]) or "none"
+                raise ContinuityError(
+                    "milestone evidence gate not satisfied "
+                    f"(missing: {missing}; failed: {failed})"
+                )
+
         learnings = [x.strip() for x in (learnings or []) if x.strip()]
 
         def change(state: dict[str, object]) -> None:
@@ -478,6 +528,7 @@ class Continuity:
                 "outcome": outcome,
                 "evidence": copy.deepcopy(step.get("evidence", [])),
                 "evidence_gate": gate,
+                "milestone_evidence_gate": milestone_gate,
                 "override_reason": override or None,
                 "learnings": learnings,
                 "milestone_done": milestone_done,

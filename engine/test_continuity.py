@@ -49,7 +49,11 @@ class ContinuityTests(unittest.TestCase):
 
     def test_step_cannot_self_certify_expected_evidence(self) -> None:
         _tmp, runtime = self.make_runtime()
-        milestone = runtime.add_milestone("Parser", activate=True)
+        milestone = runtime.add_milestone(
+            "Parser",
+            criteria=["parser regression suite passes"],
+            activate=True,
+        )
         step = runtime.begin_step(
             "Implement error recovery",
             milestone_id=milestone["id"],
@@ -91,6 +95,61 @@ class ContinuityTests(unittest.TestCase):
         event = runtime.workspace.recent_events(1)[0]
         self.assertEqual(event["type"], "step_finished")
         self.assertTrue(event["payload"]["evidence_gate"]["passed"])
+
+
+    def test_milestone_completion_requires_its_own_criteria(self) -> None:
+        _tmp, runtime = self.make_runtime()
+        milestone = runtime.add_milestone(
+            "Release",
+            criteria=["full regression suite passes", "package smoke test passes"],
+            activate=True,
+        )
+        runtime.begin_step(
+            "Prepare release",
+            milestone_id=milestone["id"],
+            expected_evidence=["full regression suite passes"],
+        )
+        runtime.record_evidence(
+            "full regression suite passes",
+            "all tests green",
+            source="ci",
+            verified=True,
+        )
+        with self.assertRaises(ContinuityError):
+            runtime.finish_step("Release prepared", milestone_done=True)
+        runtime.record_evidence(
+            "package smoke test passes",
+            "wheel installed and CLI executed",
+            source="package-job",
+            verified=True,
+        )
+        runtime.finish_step("Release prepared", milestone_done=True)
+        self.assertEqual(runtime.state()["milestones"][0]["status"], "done")
+
+    def test_step_must_bind_to_active_milestone(self) -> None:
+        _tmp, runtime = self.make_runtime()
+        pending = runtime.add_milestone("Later")
+        with self.assertRaises(ContinuityError):
+            runtime.begin_step("Premature work", milestone_id=pending["id"])
+
+    def test_cannot_switch_milestone_under_running_step(self) -> None:
+        _tmp, runtime = self.make_runtime()
+        first = runtime.add_milestone("First", activate=True)
+        second = runtime.add_milestone("Second")
+        runtime.begin_step("Work", milestone_id=first["id"])
+        with self.assertRaises(ContinuityError):
+            runtime.activate_milestone(second["id"])
+
+    def test_agent_source_cannot_mark_itself_verified(self) -> None:
+        _tmp, runtime = self.make_runtime()
+        runtime.begin_step("Run check", expected_evidence=["check passes"])
+        with self.assertRaises(ValueError):
+            runtime.record_evidence(
+                "check passes",
+                "trust me",
+                source="agent",
+                verified=True,
+            )
 
     def test_latest_verified_evidence_wins(self) -> None:
         records = [

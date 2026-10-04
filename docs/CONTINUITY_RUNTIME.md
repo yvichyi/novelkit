@@ -93,7 +93,11 @@ agent/tool execution
     └--> fail_step   -> classified failure recorded in the ledger
 ```
 
-Continuity does not pretend an agent can certify its own success. If a step declares expected evidence, it cannot finish until every criterion has a latest **verified passing** record. An unverified model claim is stored but does not satisfy the gate. CI, deterministic graders, humans, or domain adapters can supply verified records. An emergency override is possible only with an explicit reason, which is preserved in the ledger.
+Continuity does not pretend an agent can certify its own success. If a step declares expected evidence, it cannot finish until every criterion has a latest **verified passing** record. Sources explicitly labelled `agent`, `model`, `llm`, or `self` cannot mark their own evidence verified. CI, deterministic graders, humans, or domain adapters can supply verified records.
+
+Milestone completion has a second gate: every criterion declared on that milestone must also have verified passing evidence in the finishing step. A step may bind only to the currently active milestone, and the active milestone cannot be switched underneath a running bound step.
+
+The `verified` flag is still a caller assertion, not cryptographic provenance. A host with direct write access can lie about a source or rewrite the whole workspace. The hash chain detects accidental/casual mutation, not a malicious actor with filesystem control. An emergency override remains possible only with an explicit reason preserved in the ledger.
 
 ## CLI
 
@@ -130,7 +134,7 @@ python continuity_cli.py novelkit-bootstrap /path/to/book
 
 The adapter creates Continuity state alongside the book, mapping NovelKit sources into generic primitives without changing the existing story engine:
 
-- redline table -> blocking constraint source;
+- `redlines.json` (and optional rendered redline table) -> blocking constraint source;
 - consistency checklist -> blocking constraint source;
 - stage anchors -> milestones;
 - event / foreshadow ledgers -> history / commitment resources;
@@ -149,4 +153,8 @@ v0.1 intentionally stops before:
 - model-based grading;
 - distributed locking.
 
-Those belong above or beside this layer. The next useful expansion is an evaluator interface that can accept deterministic CI evidence, human approval, or model review without making the state core dependent on any one agent framework.
+Those belong above or beside this layer.
+
+The v0.1 ledger stores a full resulting state snapshot in every event. This deliberately favors simple recovery and auditable history over storage efficiency. Context sent back to an agent stays bounded, but the on-disk ledger is not yet optimized for extremely large, multi-thousand-step projects. A future format can introduce checkpointed/delta events behind a new storage version without changing the semantic state schema.
+
+The next useful expansion is a verifier adapter interface that can accept deterministic CI evidence or human approval without making the state core dependent on any one agent framework.

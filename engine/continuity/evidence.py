@@ -6,6 +6,7 @@ from typing import Iterable
 
 
 VALID_STATUSES = {"pass", "fail", "unknown"}
+SELF_ASSERTED_SOURCES = {"agent", "model", "llm", "self"}
 
 
 def make_evidence(
@@ -27,6 +28,10 @@ def make_evidence(
         raise ValueError("evidence summary cannot be empty")
     if status not in VALID_STATUSES:
         raise ValueError("evidence status must be pass, fail, or unknown")
+    if verified and source.casefold() in SELF_ASSERTED_SOURCES:
+        raise ValueError(
+            "self-asserted agent/model evidence cannot be marked verified"
+        )
     return {
         "id": evidence_id,
         "criterion": criterion,
