@@ -65,12 +65,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--precondition", action="append", default=[])
     p.add_argument("--expect", action="append", default=[])
 
+    p = sub.add_parser("step-evidence")
+    p.add_argument("path")
+    p.add_argument("criterion")
+    p.add_argument("summary")
+    p.add_argument("--source", default="external")
+    p.add_argument("--status", default="pass", choices=["pass", "fail", "unknown"])
+    p.add_argument("--verified", action="store_true")
+
     p = sub.add_parser("step-finish")
     p.add_argument("path")
     p.add_argument("outcome")
-    p.add_argument("--evidence", action="append", default=[])
     p.add_argument("--learning", action="append", default=[])
     p.add_argument("--milestone-done", action="store_true")
+    p.add_argument("--override-reason")
 
     p = sub.add_parser("step-fail")
     p.add_argument("path")
@@ -120,12 +128,20 @@ def main(argv: list[str] | None = None) -> int:
                     preconditions=args.precondition,
                     expected_evidence=args.expect,
                 ))
+            elif args.command == "step-evidence":
+                _print(runtime.record_evidence(
+                    args.criterion,
+                    args.summary,
+                    source=args.source,
+                    status=args.status,
+                    verified=args.verified,
+                ))
             elif args.command == "step-finish":
                 runtime.finish_step(
                     args.outcome,
-                    evidence=args.evidence,
                     learnings=args.learning,
                     milestone_done=args.milestone_done,
+                    override_reason=args.override_reason,
                 )
                 _print(runtime.status())
             elif args.command == "step-fail":

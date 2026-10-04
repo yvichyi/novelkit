@@ -11,8 +11,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from continuity.evidence import evaluate_evidence_gate
 from continuity.novelkit import bootstrap_novelkit
-from continuity.runtime import ConflictError, Continuity
+from continuity.runtime import ConflictError, Continuity, ContinuityError
 from continuity.store import CorruptLedgerError
 
 
@@ -46,7 +47,7 @@ class ContinuityTests(unittest.TestCase):
         self.assertEqual(len(pack["open_questions"]), 1)
         self.assertEqual(len(pack["context_hash"]), 64)
 
-    def test_step_lifecycle_preserves_evidence_and_learning(self) -> None:
+    def test_step_cannot_self_certify_expected_evidence(self) -> None:
         _tmp, runtime = self.make_runtime()
         milestone = runtime.add_milestone("Parser", activate=True)
         step = runtime.begin_step(
@@ -55,9 +56,28 @@ class ContinuityTests(unittest.TestCase):
             expected_evidence=["parser regression suite passes"],
         )
         self.assertEqual(runtime.status()["current_step"]["id"], step["id"])
+
+        with self.assertRaises(ContinuityError):
+            runtime.finish_step("I think it works")
+
+        runtime.record_evidence(
+            "parser regression suite passes",
+            "Agent says tests look fine",
+            source="agent",
+            verified=False,
+        )
+        with self.assertRaises(ContinuityError):
+            runtime.finish_step("Still not independently verified")
+
+        runtime.record_evidence(
+            "parser regression suite passes",
+            "24 parser tests passed",
+            source="ci",
+            status="pass",
+            verified=True,
+        )
         runtime.finish_step(
-            "Recovery implemented",
-            evidence=["24 parser tests passed"],
+            "Recovery implemented and externally verified",
             learnings=["Recovery must retain the original token span."],
             milestone_done=True,
         )
@@ -68,9 +88,36 @@ class ContinuityTests(unittest.TestCase):
             state["facts"][-1]["statement"],
             "Recovery must retain the original token span.",
         )
-        events = runtime.workspace.recent_events(2)
-        self.assertEqual(events[-1]["type"], "step_finished")
-        self.assertEqual(events[-1]["payload"]["evidence"], ["24 parser tests passed"])
+        event = runtime.workspace.recent_events(1)[0]
+        self.assertEqual(event["type"], "step_finished")
+        self.assertTrue(event["payload"]["evidence_gate"]["passed"])
+
+    def test_latest_verified_evidence_wins(self) -> None:
+        records = [
+            {
+                "id": "e1", "criterion": "tests", "summary": "failed",
+                "source": "ci", "status": "fail", "verified": True,
+            },
+            {
+                "id": "e2", "criterion": "tests", "summary": "passed after repair",
+                "source": "ci", "status": "pass", "verified": True,
+            },
+        ]
+        gate = evaluate_evidence_gate(["tests"], records)
+        self.assertTrue(gate["passed"])
+        self.assertEqual(gate["criteria"][0]["evidence_id"], "e2")
+
+    def test_override_is_explicit_in_ledger(self) -> None:
+        _tmp, runtime = self.make_runtime()
+        runtime.begin_step("Emergency repair", expected_evidence=["full suite passes"])
+        runtime.finish_step(
+            "Applied emergency repair",
+            override_reason="CI service unavailable; human approved temporary bypass.",
+        )
+        event = runtime.workspace.recent_events(1)[0]
+        self.assertEqual(event["type"], "step_finished")
+        self.assertFalse(event["payload"]["evidence_gate"]["passed"])
+        self.assertIn("human approved", event["payload"]["override_reason"])
 
     def test_ledger_is_hash_chained_and_tampering_is_detected(self) -> None:
         tmp, runtime = self.make_runtime()
@@ -109,12 +156,26 @@ class ContinuityTests(unittest.TestCase):
                 expected_revision=state["revision"],
             )
 
+    def test_context_window_is_bounded_while_obligations_survive(self) -> None:
+        _tmp, runtime = self.make_runtime()
+        runtime.add_constraint("Never drop the compatibility contract.")
+        runtime.add_commitment("Keep API v1 working.")
+        for i in range(40):
+            runtime.begin_step(f"Iteration {i}")
+            runtime.finish_step(f"Completed iteration {i}")
+        pack = runtime.context_pack(recent_events=3, fact_limit=0)
+        self.assertEqual(len(pack["recent_events"]), 3)
+        self.assertEqual(pack["known_facts"], [])
+        self.assertEqual(len(pack["active_constraints"]), 1)
+        self.assertEqual(len(pack["open_commitments"]), 1)
+        self.assertEqual(runtime.workspace.recent_events(0), [])
+
     def test_cli_smoke(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            cli = Path(__file__).resolve().parent / "continuity_cli.py"
+            cli_path = Path(__file__).resolve().parent / "continuity_cli.py"
             proc = subprocess.run(
                 [
-                    sys.executable, str(cli), "init", tmp,
+                    sys.executable, str(cli_path), "init", tmp,
                     "--title", "Research",
                     "--objective", "Produce an evidence-backed answer.",
                 ],
@@ -125,7 +186,7 @@ class ContinuityTests(unittest.TestCase):
             data = json.loads(proc.stdout)
             self.assertEqual(data["project"]["title"], "Research")
             proc = subprocess.run(
-                [sys.executable, str(cli), "verify", tmp],
+                [sys.executable, str(cli_path), "verify", tmp],
                 capture_output=True,
                 text=True,
                 check=True,

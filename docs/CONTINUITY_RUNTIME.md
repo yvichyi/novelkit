@@ -86,12 +86,14 @@ begin_step
     v
 agent/tool execution
     |
-    +--> finish_step -> evidence + learnings + optional milestone completion
+    +--> record_evidence -> source + pass/fail/unknown + verified flag
+    |
+    +--> finish_step -> evidence gate -> learnings + optional milestone completion
     |
     └--> fail_step   -> classified failure recorded in the ledger
 ```
 
-The runtime deliberately does not decide whether evidence is *good*. A model, deterministic grader, CI system, human, or domain adapter can do that. Continuity makes the evidence requirement persistent and inspectable.
+Continuity does not pretend an agent can certify its own success. If a step declares expected evidence, it cannot finish until every criterion has a latest **verified passing** record. An unverified model claim is stored but does not satisfy the gate. CI, deterministic graders, humans, or domain adapters can supply verified records. An emergency override is possible only with an explicit reason, which is preserved in the ledger.
 
 ## CLI
 
@@ -109,8 +111,11 @@ python continuity_cli.py milestone ./demo "Parser" \
 python continuity_cli.py step-begin ./demo "Implement recovery" \
   --expect "Parser regression suite passes"
 
+python continuity_cli.py step-evidence ./demo \
+  "Parser regression suite passes" "24 parser tests passed" \
+  --source ci --status pass --verified
+
 python continuity_cli.py step-finish ./demo "Recovery implemented" \
-  --evidence "24 parser tests passed" \
   --learning "Recovery must preserve token spans"
 
 python continuity_cli.py context ./demo
@@ -141,7 +146,7 @@ v0.1 intentionally stops before:
 - tool execution;
 - multi-agent routing;
 - semantic retrieval;
-- automatic grading;
+- model-based grading;
 - distributed locking.
 
 Those belong above or beside this layer. The next useful expansion is an evaluator interface that can accept deterministic CI evidence, human approval, or model review without making the state core dependent on any one agent framework.

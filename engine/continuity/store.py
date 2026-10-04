@@ -230,8 +230,10 @@ class Workspace:
 
     def recent_events(self, limit: int = 8) -> list[dict[str, object]]:
         events = self._read_events()
+        if limit <= 0:
+            return []
         compact = []
-        for event in events[-max(0, limit):]:
+        for event in events[-limit:]:
             compact.append({
                 "seq": event["seq"],
                 "ts": event["ts"],

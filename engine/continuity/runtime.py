@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
-from .store import ConflictError, ContinuityError, Workspace
+from .evidence import evaluate_evidence_gate, make_evidence\nfrom .store import ConflictError, ContinuityError, Workspace
 
 STATE_SCHEMA = "continuity.state/v1"
 CONTEXT_SCHEMA = "continuity.context/v1"
@@ -389,18 +389,65 @@ class Continuity:
         self._mutate("step_started", {"step": item}, change)
         return copy.deepcopy(item)
 
-    def finish_step(
+    def record_evidence(
         self,
-        outcome: str,
-        evidence: list[str] | None = None,
-        learnings: list[str] | None = None,
-        milestone_done: bool = False,
-    ) -> None:
+        criterion: str,
+        summary: str,
+        source: str = "external",
+        status: str = "pass",
+        verified: bool = False,
+    ) -> dict[str, object]:
         current = self.state()
         step = current.get("current_step")
         if not isinstance(step, dict):
             raise ContinuityError("no active step")
-        evidence = [x.strip() for x in (evidence or []) if x.strip()]
+        item = make_evidence(
+            evidence_id=_id("evidence"),
+            criterion=criterion,
+            summary=summary,
+            source=source,
+            status=status,
+            verified=verified,
+            created_at=_now(),
+        )
+
+        def change(state: dict[str, object]) -> None:
+            active = state["current_step"]
+            if not isinstance(active, dict):
+                raise ContinuityError("active step disappeared")
+            active.setdefault("evidence", []).append(item)
+
+        self._mutate("evidence_recorded", {"evidence": item}, change)
+        return copy.deepcopy(item)
+
+    def finish_step(
+        self,
+        outcome: str,
+        learnings: list[str] | None = None,
+        milestone_done: bool = False,
+        override_reason: str | None = None,
+    ) -> None:
+        outcome = outcome.strip()
+        if not outcome:
+            raise ValueError("step outcome cannot be empty")
+        current = self.state()
+        step = current.get("current_step")
+        if not isinstance(step, dict):
+            raise ContinuityError("no active step")
+
+        gate = evaluate_evidence_gate(
+            step.get("expected_evidence", []),
+            step.get("evidence", []),
+        )
+        override = (override_reason or "").strip()
+        if not gate["passed"] and not override:
+            missing = ", ".join(gate["missing"]) or "none"
+            failed = ", ".join(gate["failed"]) or "none"
+            raise ContinuityError(
+                "evidence gate not satisfied "
+                f"(missing: {missing}; failed: {failed})"
+            )
+
         learnings = [x.strip() for x in (learnings or []) if x.strip()]
 
         def change(state: dict[str, object]) -> None:
@@ -427,8 +474,10 @@ class Continuity:
             "step_finished",
             {
                 "step_id": step["id"],
-                "outcome": outcome.strip(),
-                "evidence": evidence,
+                "outcome": outcome,
+                "evidence": copy.deepcopy(step.get("evidence", [])),
+                "evidence_gate": gate,
+                "override_reason": override or None,
                 "learnings": learnings,
                 "milestone_done": milestone_done,
             },
@@ -436,6 +485,9 @@ class Continuity:
         )
 
     def fail_step(self, reason: str, classification: str = "execution") -> None:
+        reason = reason.strip()
+        if not reason:
+            raise ValueError("failure reason cannot be empty")
         current = self.state()
         step = current.get("current_step")
         if not isinstance(step, dict):
@@ -448,7 +500,7 @@ class Continuity:
             "step_failed",
             {
                 "step_id": step["id"],
-                "reason": reason.strip(),
+                "reason": reason,
                 "classification": classification.strip() or "execution",
             },
             change,
@@ -482,7 +534,7 @@ class Continuity:
                 x for x in state["questions"]  # type: ignore[index]
                 if x["status"] == "open"
             ],
-            "known_facts": state["facts"][-max(0, fact_limit):],  # type: ignore[index]
+            "known_facts": ([] if fact_limit <= 0 else state["facts"][-fact_limit:]),  # type: ignore[index]
             "resources": state["resources"],
             "current_step": state["current_step"],
             "recent_events": self.workspace.recent_events(recent_events),
